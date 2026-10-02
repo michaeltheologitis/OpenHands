@@ -1084,6 +1084,7 @@ describe("dev-with-automation CLI", () => {
     expect(output).toContain("--backend-only");
     expect(output).toContain("OH_AUTOMATION_GIT_REF");
     expect(output).toContain("OH_AGENT_SERVER_LOCAL_PATH");
+    expect(output).toContain("OH_AGENT_SERVER_GIT_REPO");
     expect(output).toContain("OPENHANDS_AUTOMATION_API_KEY");
     expect(output).toContain("SECRETS:");
   });
