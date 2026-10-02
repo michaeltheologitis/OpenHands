@@ -35,6 +35,11 @@
     "_stateDirComment": "npm and desktop launchers only; Docker uses stateSubdir. The fallback for OH_CANVAS_SAFE_STATE_DIR: an absolute path or one starting with ~/. When set here, the session and secret key files (api-key.txt, secret-key.txt) live in it too. The parent of this directory is the agent-server's persistence root (settings, secrets, profiles, installed Apps, skills, the automation database), so a build that keeps its own state names a directory whose parent is its own, e.g. ~/.example-app/agent-canvas. null means ~/.openhands/agent-canvas.",
     "stateDir": null
   },
+  "setup": {
+    "_comment": "Optional command the full-stack npm and desktop launchers (scripts/dev-with-automation.mjs: the desktop app, npm run dev, the agent-canvas bin) run as the user on every launch that starts the agent-server: before-start runs before any service starts; after-ready runs once the agent-server answers /server_info, with AGENT_SERVER_URL and SESSION_API_KEY in its environment, before automation, the frontend and the ingress start. An argv array run without a shell, stdin closed, working directory the state directory, OH_CANVAS_SETUP_PHASE naming the phase; its output goes to the startup log. A non-zero exit, a signal or 15 minutes without exiting stops the launch. null means no setup. phases lists before-start, after-ready or both (the default).",
+    "command": null,
+    "phases": ["before-start", "after-ready"]
+  },
   "packages": {
     "agentServer": "openhands-agent-server",
     "automation": "openhands-automation",

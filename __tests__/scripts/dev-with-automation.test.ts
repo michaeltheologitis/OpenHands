@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -23,7 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import {
   buildAgentServerAutomationEnv,
   buildAutomationCommand,
@@ -31,13 +32,16 @@ import {
   buildAutomationRuntimeServicesInfo,
   buildConfig,
   buildRouteArgs,
+  buildSetupEnv,
   buildViteBackendEnv,
   buildViteFrontendEnv,
   getAgentServerBaseUrl,
   getFrontendBackend,
   getLocalServiceRoutes,
   getRejectPrefixes,
+  runSetupCommand,
   setServiceLogListener,
+  SetupCommandError,
   spawnService,
   validateLocalAutomationPath,
   DEFAULT_AUTOMATION_REPO,
@@ -967,6 +971,212 @@ describe("setServiceLogListener", () => {
   });
 });
 
+describe("setup command", () => {
+  const stateDir = path.join(tmpdir(), "example-app", "agent-canvas");
+  const config = {
+    stateDir,
+    agentServerPort: 18000,
+    sessionApiKey: "a".repeat(64),
+  };
+
+  it("buildSetupEnv gives both phases the phase, the state directory and the persistence root", () => {
+    for (const phase of ["before-start", "after-ready"] as const) {
+      expect(buildSetupEnv(config, phase)).toMatchObject({
+        OH_CANVAS_SETUP_PHASE: phase,
+        OH_CANVAS_SAFE_STATE_DIR: stateDir,
+        OH_PERSISTENCE_DIR: path.dirname(stateDir),
+      });
+    }
+  });
+
+  it("buildSetupEnv gives the agent-server URL and session key only after the agent-server is ready", () => {
+    const beforeStart = buildSetupEnv(config, "before-start");
+    expect(beforeStart).not.toHaveProperty("AGENT_SERVER_URL");
+    expect(beforeStart).not.toHaveProperty("SESSION_API_KEY");
+
+    expect(buildSetupEnv(config, "after-ready")).toMatchObject({
+      AGENT_SERVER_URL: "http://127.0.0.1:18000",
+      SESSION_API_KEY: config.sessionApiKey,
+    });
+  });
+
+  describe("runSetupCommand", () => {
+    const logged: Array<{ name: string; line: string; level: string }> = [];
+    const node = (source: string, ...args: string[]) => [
+      process.execPath,
+      "-e",
+      source,
+      ...args,
+    ];
+    const run = (
+      command: string[],
+      options: Partial<Parameters<typeof runSetupCommand>[0]> = {},
+    ) =>
+      runSetupCommand({
+        command,
+        phase: "before-start",
+        cwd: tmpdir(),
+        env: {},
+        ...options,
+      });
+    const linesOf = (name: string) =>
+      logged.filter((entry) => entry.name === name).map((entry) => entry.line);
+
+    beforeEach(() => {
+      logged.length = 0;
+      setServiceLogListener((name: string, line: string, level: string) => {
+        logged.push({ name, line, level });
+      });
+    });
+
+    afterEach(() => {
+      setServiceLogListener(null);
+    });
+
+    it("runs argv without a shell", async () => {
+      await run(
+        node(
+          "console.log(JSON.stringify(process.argv.slice(1)))",
+          "$HOME; echo x",
+        ),
+      );
+
+      expect(linesOf("setup before-start")).toContain(
+        JSON.stringify(["$HOME; echo x"]),
+      );
+    });
+
+    it("streams each output line to the service log under its phase", async () => {
+      const command = node(
+        'console.log("one"); console.error("two"); console.log("three")',
+      );
+
+      await run(command, { phase: "after-ready" });
+
+      const entries = logged.filter(
+        (entry) => entry.name === "setup after-ready",
+      );
+      expect(entries[0]).toEqual({
+        name: "setup after-ready",
+        line: `Running ${command.join(" ")}`,
+        level: "info",
+      });
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          { name: "setup after-ready", line: "one", level: "stdout" },
+          { name: "setup after-ready", line: "two", level: "stderr" },
+          { name: "setup after-ready", line: "three", level: "stdout" },
+        ]),
+      );
+      expect(entries.at(-1)).toMatchObject({
+        line: expect.stringMatching(/^Done in \d+s$/),
+        level: "info",
+      });
+    });
+
+    it("closes stdin, so a command that reads it sees end of input", async () => {
+      await run(
+        node(
+          'process.stdin.on("end", () => console.log("stdin ended")); process.stdin.resume()',
+        ),
+      );
+
+      expect(linesOf("setup before-start")).toContain("stdin ended");
+    });
+
+    it("runs in the given working directory with the given variables", async () => {
+      const cwd = mkdtempSync(path.join(tmpdir(), "setup-cwd-"));
+      try {
+        await run(
+          node(
+            "console.log(process.cwd()); console.log(process.env.EXAMPLE_SETUP_VAR)",
+          ),
+          { cwd, env: { EXAMPLE_SETUP_VAR: "from-the-launcher" } },
+        );
+
+        const lines = linesOf("setup before-start");
+        expect(lines).toContain(realpathSync(cwd));
+        expect(lines).toContain("from-the-launcher");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      ["before-start", "before the stack started."],
+      ["after-ready", "after the agent-server started; the stack was stopped."],
+    ] as const)(
+      "a non-zero exit rejects with a SetupCommandError naming the command, phase and exit code (%s)",
+      async (phase, clause) => {
+        const command = node("process.exit(2)");
+
+        const error = await run(command, { phase }).catch((e) => e);
+
+        expect(error).toBeInstanceOf(SetupCommandError);
+        expect(error).toMatchObject({
+          name: "SetupCommandError",
+          message: `Setup command \`${command.join(" ")}\` failed (exit 2) ${clause} Its output is in the startup log.`,
+          phase,
+          command,
+          reason: "exit",
+          exitCode: 2,
+          signal: null,
+        });
+      },
+    );
+
+    it.skipIf(process.platform === "win32")(
+      "a command killed by a signal rejects naming the signal",
+      async () => {
+        const command = node('process.kill(process.pid, "SIGKILL")');
+
+        const error = await run(command).catch((e) => e);
+
+        expect(error).toMatchObject({
+          message: `Setup command \`${command.join(" ")}\` was killed by SIGKILL before the stack started. Its output is in the startup log.`,
+          reason: "signal",
+          exitCode: null,
+          signal: "SIGKILL",
+        });
+      },
+    );
+
+    it("a command that cannot be started rejects with a SetupCommandError", async () => {
+      const error = await run([
+        "example-app-that-is-not-installed",
+        "setup",
+      ]).catch((e) => e);
+
+      expect(error).toBeInstanceOf(SetupCommandError);
+      expect(error).toMatchObject({
+        message:
+          "Setup command `example-app-that-is-not-installed setup` could not be started (spawn example-app-that-is-not-installed ENOENT) before the stack started.",
+        reason: "spawn",
+        exitCode: null,
+        signal: null,
+      });
+    });
+
+    it("a command still running at its timeout is stopped and rejects", async () => {
+      const command = node(
+        "console.log(`pid ${process.pid}`); setInterval(() => {}, 1_000)",
+      );
+
+      const error = await run(command, { timeoutMs: 200 }).catch((e) => e);
+
+      expect(error).toMatchObject({
+        message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+        reason: "timeout",
+      });
+      const pidLine = linesOf("setup before-start").find((line) =>
+        line.startsWith("pid "),
+      );
+      const pid = Number(pidLine?.slice("pid ".length));
+      expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+    });
+  });
+});
+
 describe("dev-with-automation CLI", () => {
   it.skipIf(process.platform === "win32")(
     "cleans up detached services when the launcher receives SIGHUP",
@@ -1096,6 +1306,7 @@ describe("dev-with-automation CLI", () => {
     expect(output).toContain("OH_AGENT_SERVER_LOCAL_PATH");
     expect(output).toContain("OH_AGENT_SERVER_GIT_REPO");
     expect(output).toContain("OPENHANDS_AUTOMATION_API_KEY");
+    expect(output).toContain("SETUP:");
     expect(output).toContain("SECRETS:");
   });
 
@@ -1329,6 +1540,37 @@ http
   .listen(port, "127.0.0.1");
 `;
 
+// The setup command: records its phase, working directory and environment,
+// and fails in the phase SETUP_STUB_FAIL_PHASE names.
+const SETUP_STUB_SOURCE = `
+import { appendFileSync } from "node:fs";
+
+const phase = process.env.OH_CANVAS_SETUP_PHASE;
+const env = {};
+for (const name of [
+  "OH_CANVAS_SETUP_PHASE",
+  "OH_CANVAS_SAFE_STATE_DIR",
+  "OH_PERSISTENCE_DIR",
+  "AGENT_SERVER_URL",
+  "SESSION_API_KEY",
+]) {
+  if (process.env[name] !== undefined) env[name] = process.env[name];
+}
+appendFileSync(
+  process.env.SETUP_STUB_LOG,
+  JSON.stringify({ phase, cwd: process.cwd(), env, time: Date.now() }) + "\\n",
+);
+console.log("example setup: " + phase);
+process.exit(phase === process.env.SETUP_STUB_FAIL_PHASE ? 2 : 0);
+`;
+
+type SetupRecord = {
+  phase: string;
+  cwd: string;
+  env: Record<string, string>;
+  time: number;
+};
+
 type UvxRecord = {
   service: "agent-server" | "automation";
   pid: number;
@@ -1356,7 +1598,9 @@ async function waitUntil(condition: () => boolean, timeoutMs = 15_000) {
   return condition();
 }
 
-function createPackagedApp(launcherDefaults: Record<string, unknown>) {
+function createPackagedApp(
+  launcherDefaults: (root: string) => Record<string, unknown>,
+) {
   const root = mkdtempSync(path.join(tmpdir(), "canvas-packaged-"));
   mkdirSync(path.join(root, "scripts"));
   for (const file of readdirSync(path.join(repoRoot, "scripts"))) {
@@ -1376,7 +1620,7 @@ function createPackagedApp(launcherDefaults: Record<string, unknown>) {
   mkdirSync(path.join(root, "config"));
   writeFileSync(
     path.join(root, "config", "defaults.json"),
-    JSON.stringify({ ...repoDefaults, ...launcherDefaults }, null, 2),
+    JSON.stringify({ ...repoDefaults, ...launcherDefaults(root) }, null, 2),
   );
 
   const bin = path.join(root, "bin");
@@ -1389,6 +1633,7 @@ function createPackagedApp(launcherDefaults: Record<string, unknown>) {
   );
   const home = path.join(root, "home");
   mkdirSync(home);
+  writeFileSync(path.join(root, "setup-stub.mjs"), SETUP_STUB_SOURCE);
 
   return {
     root,
@@ -1396,7 +1641,15 @@ function createPackagedApp(launcherDefaults: Record<string, unknown>) {
     home,
     uvxLog: path.join(root, "uvx.jsonl"),
     uvxRecords: () => readJsonLines<UvxRecord>(path.join(root, "uvx.jsonl")),
+    setupLog: path.join(root, "setup.jsonl"),
+    setupRecords: () =>
+      readJsonLines<SetupRecord>(path.join(root, "setup.jsonl")),
   };
+}
+
+/** The setup command a packaged app's defaults.json names for the stub. */
+function setupStubCommand(root: string) {
+  return [process.execPath, path.join(root, "setup-stub.mjs")];
 }
 
 type PackagedApp = ReturnType<typeof createPackagedApp>;
@@ -1425,6 +1678,7 @@ async function launchPackagedApp(
         OH_CANVAS_SAFE_BACKEND_PORT: String(ports.agentServer),
         OH_CANVAS_SAFE_AUTOMATION_PORT: String(ports.automation),
         UVX_STUB_LOG: app.uvxLog,
+        SETUP_STUB_LOG: app.setupLog,
         ...env,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -1478,11 +1732,38 @@ describe.skipIf(process.platform === "win32")(
       }
     });
 
-    function packagedApp(launcherDefaults: Record<string, unknown>) {
-      const app = createPackagedApp(launcherDefaults);
+    function packagedApp(
+      launcherDefaults:
+        | Record<string, unknown>
+        | ((root: string) => Record<string, unknown>),
+    ) {
+      const app = createPackagedApp(
+        typeof launcherDefaults === "function"
+          ? launcherDefaults
+          : () => launcherDefaults,
+      );
       apps.push(app);
       return app;
     }
+
+    const withSetup = (root: string) => ({
+      setup: {
+        command: setupStubCommand(root),
+        phases: ["before-start", "after-ready"],
+      },
+    });
+    const setupFailure = (root: string, clause: string) =>
+      `Setup command \`${setupStubCommand(root).join(" ")}\` failed (exit 2) ${clause} Its output is in the startup log.`;
+
+    const isListening = (port: number) =>
+      new Promise<boolean>((resolve) => {
+        const socket = net.connect(port, "127.0.0.1");
+        socket.once("connect", () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once("error", () => resolve(false));
+      });
 
     const agentServerStart = (app: PackagedApp) =>
       app
@@ -1588,6 +1869,126 @@ describe.skipIf(process.platform === "win32")(
           OH_SESSION_API_KEYS_0: sessionKey,
         });
         expect(existsSync(path.join(app.home, ".openhands"))).toBe(false);
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+    it("runs before-start before the agent-server and after-ready once it answers", async () => {
+      const app = packagedApp(withSetup);
+      const launch = await launchPackagedApp(app);
+
+      try {
+        const automationStart = () =>
+          app
+            .uvxRecords()
+            .find(
+              (record) =>
+                record.service === "automation" && record.kind === "start",
+            );
+        expect(
+          await waitUntil(() => automationStart() !== undefined),
+          launch.output(),
+        ).toBe(true);
+
+        const [beforeStart, afterReady, ...rest] = app.setupRecords();
+        expect(rest).toEqual([]);
+        expect(beforeStart.phase).toBe("before-start");
+        expect(afterReady.phase).toBe("after-ready");
+
+        const records = app.uvxRecords();
+        const agentServer = records.find(
+          (record) =>
+            record.service === "agent-server" && record.kind === "start",
+        )!;
+        const firstServerInfo = records.find(
+          (record) =>
+            record.service === "agent-server" && record.url === "/server_info",
+        )!;
+        expect(beforeStart.time).toBeLessThan(agentServer.time);
+        expect(afterReady.time).toBeGreaterThan(firstServerInfo.time);
+        expect(afterReady.time).toBeLessThan(automationStart()!.time);
+
+        const stateDir = realpathSync(
+          path.join(app.home, ".openhands", "agent-canvas"),
+        );
+        for (const record of [beforeStart, afterReady]) {
+          expect(record.cwd).toBe(stateDir);
+          expect(record.env).toMatchObject({
+            OH_CANVAS_SAFE_STATE_DIR: stateDir,
+            OH_PERSISTENCE_DIR: path.dirname(stateDir),
+          });
+        }
+        expect(beforeStart.env).not.toHaveProperty("AGENT_SERVER_URL");
+        expect(beforeStart.env).not.toHaveProperty("SESSION_API_KEY");
+        expect(afterReady.env).toMatchObject({
+          AGENT_SERVER_URL: `http://127.0.0.1:${launch.ports.agentServer}`,
+          SESSION_API_KEY: agentServer.env?.OH_SESSION_API_KEYS_0,
+        });
+        expect(launch.output()).toContain("example setup: before-start");
+        expect(launch.output()).toContain("example setup: after-ready");
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+
+    it("a failing before-start setup stops the launch before any service starts", async () => {
+      const app = packagedApp(withSetup);
+      const launch = await launchPackagedApp(app, {
+        SETUP_STUB_FAIL_PHASE: "before-start",
+      });
+
+      try {
+        expect(await launch.exited).toBe(1);
+        expect(launch.output()).toContain(
+          setupFailure(app.root, "before the stack started."),
+        );
+        expect(launch.output()).toContain("example setup: before-start");
+        expect(app.uvxRecords()).toEqual([]);
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+
+    it("a failing after-ready setup stops the agent-server and fails the launch", async () => {
+      const app = packagedApp(withSetup);
+      const launch = await launchPackagedApp(app, {
+        SETUP_STUB_FAIL_PHASE: "after-ready",
+      });
+
+      try {
+        expect(await launch.exited).toBe(1);
+        expect(launch.output()).toContain(
+          setupFailure(
+            app.root,
+            "after the agent-server started; the stack was stopped.",
+          ),
+        );
+        expect(app.setupRecords().map((record) => record.phase)).toEqual([
+          "before-start",
+          "after-ready",
+        ]);
+        expect(await isListening(launch.ports.agentServer)).toBe(false);
+        expect(
+          app.uvxRecords().some((record) => record.service === "automation"),
+        ).toBe(false);
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+
+    it("a malformed setup in defaults.json fails the launch before anything runs", async () => {
+      const app = packagedApp({
+        setup: { command: "example-app setup", phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+
+      try {
+        expect(await launch.exited).toBe(1);
+        expect(launch.output()).toContain(
+          'setup.command in config/defaults.json must be a non-empty array of non-empty strings, got: "example-app setup"',
+        );
+        expect(app.uvxRecords()).toEqual([]);
+        expect(app.setupRecords()).toEqual([]);
       } finally {
         await launch.stop();
       }
