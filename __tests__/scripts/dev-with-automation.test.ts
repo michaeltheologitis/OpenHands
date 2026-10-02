@@ -8,7 +8,17 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -1278,3 +1288,309 @@ describe("dev-with-automation CLI", () => {
     expect(output).toContain("uvx");
   });
 });
+
+// ── A packaged build's launch ────────────────────────────────────────────────
+//
+// The launcher run from a directory outside the repository holding what the
+// desktop app ships (electron-builder.config.mjs `files`): scripts/*.mjs,
+// tools/ and a config/defaults.json the test writes. Outside the repository a
+// bare npm import in a launcher script fails here as it does in the installed
+// app. A stub `uvx` first on PATH records its argv and answers 200 on its
+// --port, standing in for the agent-server and the automation backend. The
+// ingress cannot resolve httpxy here and logs that; nothing below depends on it.
+
+const UVX_STUB_SOURCE = `
+import { appendFileSync } from "node:fs";
+import http from "node:http";
+
+const argv = process.argv.slice(2);
+const service = argv.includes("agent-server") ? "agent-server" : "automation";
+const record = (entry) =>
+  appendFileSync(
+    process.env.UVX_STUB_LOG,
+    JSON.stringify({ service, pid: process.pid, time: Date.now(), ...entry }) + "\\n",
+  );
+record({
+  kind: "start",
+  argv,
+  env: {
+    OH_PERSISTENCE_DIR: process.env.OH_PERSISTENCE_DIR,
+    OH_SESSION_API_KEYS_0: process.env.OH_SESSION_API_KEYS_0,
+  },
+});
+const port = Number(argv[argv.indexOf("--port") + 1]);
+http
+  .createServer((req, res) => {
+    record({ kind: "request", method: req.method, url: req.url });
+    req.resume();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  })
+  .listen(port, "127.0.0.1");
+`;
+
+type UvxRecord = {
+  service: "agent-server" | "automation";
+  pid: number;
+  time: number;
+  kind: "start" | "request";
+  argv?: string[];
+  env?: Record<string, string | undefined>;
+  method?: string;
+  url?: string;
+};
+
+function readJsonLines<T>(file: string): T[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
+}
+
+async function waitUntil(condition: () => boolean, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await delay(50);
+  }
+  return condition();
+}
+
+function createPackagedApp(launcherDefaults: Record<string, unknown>) {
+  const root = mkdtempSync(path.join(tmpdir(), "canvas-packaged-"));
+  mkdirSync(path.join(root, "scripts"));
+  for (const file of readdirSync(path.join(repoRoot, "scripts"))) {
+    if (file.endsWith(".mjs")) {
+      copyFileSync(
+        path.join(repoRoot, "scripts", file),
+        path.join(root, "scripts", file),
+      );
+    }
+  }
+  cpSync(path.join(repoRoot, "tools"), path.join(root, "tools"), {
+    recursive: true,
+  });
+  const repoDefaults = JSON.parse(
+    readFileSync(path.join(repoRoot, "config", "defaults.json"), "utf8"),
+  );
+  mkdirSync(path.join(root, "config"));
+  writeFileSync(
+    path.join(root, "config", "defaults.json"),
+    JSON.stringify({ ...repoDefaults, ...launcherDefaults }, null, 2),
+  );
+
+  const bin = path.join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "uvx-stub.mjs"), UVX_STUB_SOURCE);
+  writeFileSync(
+    path.join(bin, "uvx"),
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(bin, "uvx-stub.mjs"))} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const home = path.join(root, "home");
+  mkdirSync(home);
+
+  return {
+    root,
+    bin,
+    home,
+    uvxLog: path.join(root, "uvx.jsonl"),
+    uvxRecords: () => readJsonLines<UvxRecord>(path.join(root, "uvx.jsonl")),
+  };
+}
+
+type PackagedApp = ReturnType<typeof createPackagedApp>;
+
+async function launchPackagedApp(
+  app: PackagedApp,
+  env: Record<string, string> = {},
+) {
+  const ports = await findFreePorts([
+    { name: "ingress", preferred: 0 },
+    { name: "agentServer", preferred: 0 },
+    { name: "automation", preferred: 0 },
+  ]);
+  const child = spawn(
+    process.execPath,
+    [
+      path.join(app.root, "scripts", "dev-with-automation.mjs"),
+      "--backend-only",
+    ],
+    {
+      cwd: app.root,
+      env: {
+        PATH: `${app.bin}${path.delimiter}${process.env.PATH ?? ""}`,
+        HOME: app.home,
+        PORT: String(ports.ingress),
+        OH_CANVAS_SAFE_BACKEND_PORT: String(ports.agentServer),
+        OH_CANVAS_SAFE_AUTOMATION_PORT: String(ports.automation),
+        UVX_STUB_LOG: app.uvxLog,
+        ...env,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  const exited = once(child, "exit").then(([code]) => code as number | null);
+
+  return {
+    child,
+    ports,
+    output: () => output,
+    exited,
+    /** Stop the launcher as a user would, and reap anything it left behind. */
+    async stop() {
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+        await Promise.race([exited, delay(10_000)]);
+      }
+      if (child.exitCode === null) child.kill("SIGKILL");
+      for (const { pid } of app.uvxRecords()) {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // Already stopped by the launcher, which is the expected path.
+        }
+      }
+    },
+  };
+}
+
+describe.skipIf(process.platform === "win32")(
+  "a packaged build's launch",
+  () => {
+    const forkRepo = "https://github.com/example/agent-sdk-fork";
+    const commitSha = "91430aa551ca3deb88989685656837929b3c246b";
+    const forkSource = {
+      sources: { agentServerGitRepo: forkRepo, agentServerGitRef: commitSha },
+    };
+    const apps: PackagedApp[] = [];
+
+    afterEach(() => {
+      for (const app of apps.splice(0)) {
+        rmSync(app.root, { recursive: true, force: true });
+      }
+    });
+
+    function packagedApp(launcherDefaults: Record<string, unknown>) {
+      const app = createPackagedApp(launcherDefaults);
+      apps.push(app);
+      return app;
+    }
+
+    const agentServerStart = (app: PackagedApp) =>
+      app
+        .uvxRecords()
+        .find(
+          (record) =>
+            record.service === "agent-server" && record.kind === "start",
+        );
+
+    it("a packaged build starts the agent-server its defaults.json names", async () => {
+      const app = packagedApp(forkSource);
+      const launch = await launchPackagedApp(app);
+
+      try {
+        expect(
+          await waitUntil(() => agentServerStart(app) !== undefined),
+          launch.output(),
+        ).toBe(true);
+
+        const gitUrl = `git+${forkRepo}@${commitSha}`;
+        expect(agentServerStart(app)?.argv).toEqual([
+          "--from",
+          `${gitUrl}#subdirectory=openhands-agent-server`,
+          "--with",
+          `${gitUrl}#subdirectory=openhands-sdk`,
+          "--with",
+          `${gitUrl}#subdirectory=openhands-tools`,
+          "--with",
+          `${gitUrl}#subdirectory=openhands-workspace`,
+          "--with",
+          "posthog>=6,<7",
+          "agent-server",
+          "--import-modules",
+          "canvas_ui_tool",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          String(launch.ports.agentServer),
+        ]);
+        expect(launch.output()).toContain(
+          `Using git (example/agent-sdk-fork@${commitSha})`,
+        );
+        expect(launch.output()).toContain(
+          "From config/defaults.json: OH_AGENT_SERVER_GIT_REF, OH_AGENT_SERVER_GIT_REPO",
+        );
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+
+    it("the environment still wins over defaults.json", async () => {
+      const app = packagedApp(forkSource);
+      const launch = await launchPackagedApp(app, {
+        OH_AGENT_SERVER_VERSION: "1.18.0",
+      });
+
+      try {
+        expect(
+          await waitUntil(() => agentServerStart(app) !== undefined),
+          launch.output(),
+        ).toBe(true);
+
+        const { argv = [] } = agentServerStart(app) ?? {};
+        expect(argv.slice(0, 2)).toEqual([
+          "--from",
+          "openhands-agent-server==1.18.0",
+        ]);
+        expect(argv.join(" ")).not.toContain(forkRepo);
+        expect(launch.output()).toContain("Using PyPI (1.18.0)");
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+
+    it("the state directory and key files named by defaults.json are used", async () => {
+      const app = packagedApp({
+        paths: {
+          ...JSON.parse(
+            readFileSync(
+              path.join(repoRoot, "config", "defaults.json"),
+              "utf8",
+            ),
+          ).paths,
+          stateDir: "~/.example-app/agent-canvas",
+        },
+      });
+      const launch = await launchPackagedApp(app);
+
+      try {
+        expect(
+          await waitUntil(() => agentServerStart(app) !== undefined),
+          launch.output(),
+        ).toBe(true);
+
+        const stateDir = path.join(app.home, ".example-app", "agent-canvas");
+        const sessionKey = readFileSync(
+          path.join(stateDir, "api-key.txt"),
+          "utf8",
+        ).trim();
+        expect(existsSync(path.join(stateDir, "secret-key.txt"))).toBe(true);
+        expect(agentServerStart(app)?.env).toEqual({
+          OH_PERSISTENCE_DIR: path.join(app.home, ".example-app"),
+          OH_SESSION_API_KEYS_0: sessionKey,
+        });
+        expect(existsSync(path.join(app.home, ".openhands"))).toBe(false);
+      } finally {
+        await launch.stop();
+      }
+    }, 30_000);
+  },
+);
