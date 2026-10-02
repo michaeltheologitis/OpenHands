@@ -877,6 +877,13 @@ export function buildAgentServerEnv(config, options = {}) {
     // a follow-up change to the automation preset reads
     // OH_SESSION_API_KEYS_0 directly (which is already in env).
     AGENT_SERVER_URL: config.backendBaseUrl,
+    // Canvas App backends need a browser origin of their own: the
+    // agent-server's App-backend bridge answers 503 until one is configured,
+    // and it must differ from the origin Canvas is served on. The
+    // agent-server's direct loopback address is one, since Canvas is served
+    // on another port (and as localhost, another site). An explicit value wins.
+    OH_APP_BACKEND_PUBLIC_URL:
+      env.OH_APP_BACKEND_PUBLIC_URL || `http://127.0.0.1:${config.backendPort}`,
     // Let the agent-server resolve canvas_ui_tool when old persisted metadata
     // requests that compatibility module during startup.
     OH_EXTRA_PYTHON_PATH: config.canvasToolsDir,
