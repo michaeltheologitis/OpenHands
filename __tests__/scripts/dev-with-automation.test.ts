@@ -39,6 +39,7 @@ import {
 import {
   buildAgentServerEnv,
   buildSafeDevConfig,
+  findFreePorts,
   resetPersistedSessionApiKeyCache,
 } from "../../scripts/dev-safe.mjs";
 import { createRouter } from "../../scripts/proxy-utils.mjs";
@@ -1164,6 +1165,82 @@ describe("dev-with-automation CLI", () => {
       rmSync(stubBinDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "fails at once, with the exit code and last output, when the agent-server exits before answering",
+    async () => {
+      // A uvx that fails at once (no network, a bad ref) must not leave the
+      // launcher waiting out its readiness timeout: 60 s here, 10 minutes in
+      // the desktop app.
+      const home = mkdtempSync(path.join(tmpdir(), "dwa-early-exit-home-"));
+      const stubBinDir = mkdtempSync(
+        path.join(tmpdir(), "dwa-early-exit-bin-"),
+      );
+      writeFileSync(
+        path.join(stubBinDir, "uvx"),
+        [
+          "#!/bin/sh",
+          'echo "Resolving openhands-agent-server"',
+          'echo "error: Failed to fetch: network unreachable" >&2',
+          "exit 3",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const ports = await findFreePorts([
+        { name: "ingress", preferred: 0 },
+        { name: "agentServer", preferred: 0 },
+        { name: "automation", preferred: 0 },
+      ]);
+
+      const startedAt = Date.now();
+      const child = spawn(
+        process.execPath,
+        ["scripts/dev-with-automation.mjs", "--backend-only"],
+        {
+          cwd: repoRoot,
+          env: {
+            PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+            HOME: home,
+            PORT: String(ports.ingress),
+            OH_CANVAS_SAFE_BACKEND_PORT: String(ports.agentServer),
+            OH_CANVAS_SAFE_AUTOMATION_PORT: String(ports.automation),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.stderr.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+
+      try {
+        const exitResult = await Promise.race([
+          once(child, "exit").then(([code]) => ({ code, timedOut: false })),
+          delay(20_000).then(() => ({ code: null, timedOut: true })),
+        ]);
+
+        expect(exitResult.timedOut, output).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThan(20_000);
+        expect(exitResult.code).toBe(1);
+        expect(output).toContain(
+          "agent-server exited before startup completed (code=3, signal=null). Last output:",
+        );
+        const lastOutput = output.slice(output.indexOf("Last output:"));
+        expect(lastOutput).toContain("Resolving openhands-agent-server");
+        expect(lastOutput).toContain(
+          "error: Failed to fetch: network unreachable",
+        );
+      } finally {
+        if (child.exitCode === null) child.kill("SIGKILL");
+        rmSync(home, { recursive: true, force: true });
+        rmSync(stubBinDir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 
   it("exits promptly when uvx is missing", async () => {
     const child = spawn(process.execPath, ["scripts/dev-with-automation.mjs"], {
