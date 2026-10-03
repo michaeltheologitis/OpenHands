@@ -1041,6 +1041,12 @@ describe("setup command", () => {
       }).stdout.trim();
       return state === "" || state.startsWith("Z");
     };
+    /** Resolves once `pid`, a child of this process, has been reaped. */
+    const reaped = async (pid: number) => {
+      while (spawnSync("ps", ["-p", String(pid)]).status === 0) {
+        await delay(10);
+      }
+    };
 
     beforeEach(() => {
       logged.length = 0;
@@ -1235,6 +1241,31 @@ describe("setup command", () => {
           const error = await stopped;
 
           expect(error).toMatchObject({ reason: "timeout" });
+          await expect
+            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
+            .toBe(true);
+        },
+      );
+
+      it.skipIf(process.platform === "win32").each([
+        ["obeys", "", 200],
+        ["ignores", 'trap "" TERM; ', 200 + 3_000],
+      ])(
+        "the stop reaches a background child that %s SIGTERM after the command itself has exited",
+        async (_, trap, untilStopped) => {
+          const command = ["sh", "-c", `${trap}sleep 300 & echo $$ $!`];
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, shell, child] = await printed(/^(\d+) (\d+)$/);
+          await reaped(Number(shell));
+          expect(hasExited(Number(child))).toBe(false);
+          vi.advanceTimersByTime(untilStopped);
+          const error = await stopped;
+
+          expect(error).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
           await expect
             .poll(() => hasExited(Number(child)), { timeout: 10_000 })
             .toBe(true);

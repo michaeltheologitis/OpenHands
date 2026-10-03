@@ -1288,8 +1288,9 @@ function setupFailureMessage({
  *   env: Record<string, string>,
  *   timeoutMs?: number,
  * }} options  timeoutMs defaults to SETUP_COMMAND_TIMEOUT_MS; on expiry the
- *   process tree gets SIGTERM, SIGKILL 3 s later if still running, and the
- *   promise rejects once it has exited
+ *   command's process group gets SIGTERM, SIGKILL 3 s later if still running,
+ *   whether or not the command itself has exited, and the promise rejects once
+ *   its output has closed
  * @returns {Promise<{ durationMs: number }>}
  * @throws {SetupCommandError} on a non-zero exit, a signal, a spawn error or the timeout
  */
@@ -1312,13 +1313,14 @@ export async function runSetupCommand({
   const outcome = await new Promise((settle) => {
     let timedOut = false;
     let forceStop = null;
+    // Until "close", something still holds the command's output: a child it
+    // left in the background can outlive it in its process group.
+    const stop = (signal) =>
+      signalProcessTree(proc, signal, { evenIfLeaderExited: true });
     const timeout = setTimeout(() => {
       timedOut = true;
-      signalProcessTree(proc, "SIGTERM");
-      forceStop = setTimeout(
-        () => signalProcessTree(proc, "SIGKILL"),
-        FORCE_STOP_DELAY_MS,
-      );
+      stop("SIGTERM");
+      forceStop = setTimeout(() => stop("SIGKILL"), FORCE_STOP_DELAY_MS);
     }, timeoutMs);
     const finish = (result) => {
       clearTimeout(timeout);
