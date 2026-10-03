@@ -114,6 +114,21 @@
         "src/mocks/canvas-extensions-handlers.ts"
       ],
       "tests": ["canvas-extensions"]
+    },
+    {
+      "comment": "App header panels in a conversation: button, column, tabs, narrow-window page",
+      "sources": [
+        "src/components/features/conversation/conversation-app-panel*.tsx",
+        "src/components/features/conversation/conversation-app-panel/**",
+        "src/components/features/conversation/conversation-main/**",
+        "src/hooks/use-conversation-app-panel-tabs.ts",
+        "src/hooks/query/use-canvas-extension-panel-icon.ts",
+        "src/stores/conversation-store.ts",
+        "src/utils/conversation-local-storage.ts",
+        "src/utils/conversation-app-panel-path.ts",
+        "src/routes/conversation-app-panel.tsx"
+      ],
+      "tests": ["canvas-extensions"]
     }
   ],
 

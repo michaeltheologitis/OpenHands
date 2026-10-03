@@ -120,7 +120,55 @@ host API contains:
 - `registerPage(id, mount)` for page factories declared by the manifest
 - `navigate(path)` using Canvas base-path-aware routing
 - `agentServer.request(...)`, an authenticated request helper targeting the
-  extension's owning backend
+  extension's owning backend; a request may take up to 60 seconds
+  (`CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS`), enough for an App
+  backend to start
+
+### Conversation header panels
+
+An App may also contribute panels to the conversation header. Each panel gets
+a button after Show panel; it opens the drawer's column with the App's tabs,
+and each tab is an App page:
+
+```json
+{
+  "contributes": {
+    "conversation_panels": [
+      {
+        "id": "insights",
+        "title": "Insights",
+        "icon": "assets/insights.svg",
+        "tabs": [
+          { "id": "summary", "title": "Summary", "path": "/" },
+          { "id": "history", "title": "History", "path": "/history" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Panel and tab ids are contribution ids, unique across the App's pages,
+  panels, and tabs. A panel has at least one tab; a tab's `path` is `/` or an
+  absolute kebab-case path, unique in its panel; `icon` is an optional
+  package-relative `.svg` or `.png`, fetched with the session key.
+- The App registers each tab with `registerPage(<tab id>, mount)`. Registering
+  a panel's own id, an undeclared id, or an id twice fails activation. An
+  Agent Server without `canvas_conversation_panels_v1` in `/server_info` drops
+  the key; there a tab registration is refused without failing the App, and the
+  Apps page says why.
+- Every mount receives `conversationId` and `surface`. A routed page gets
+  `conversationId: null` and `surface: { kind: "page" }`; a panel tab gets the
+  conversation's id and
+  `surface: { kind: "conversation-panel", panelId, tabId, selectTab(tabId) }`,
+  and `path` is the tab's path without its leading `/`.
+- A tab is mounted while it is visible and disposed when another tab is
+  selected, the panel closes, the conversation changes (then mounted again for
+  the new one), the window crosses the narrow-window breakpoint, the App is
+  disabled or re-activated, or the backend switches. Its container fills the
+  panel body and scrolls.
+- On a narrow window a panel is the page
+  `/conversations/{id}/panel/{extension-name}/{panel-id}`.
 
 The runtime fetches the bundle as authenticated text and imports it through a
 temporary Blob URL. A direct `<script src>` or `import(backendUrl)` cannot carry
@@ -246,6 +294,8 @@ continues to work.
 - Replace the closed conversation tab union with namespaced runtime IDs and
   centralized persistence admission.
 - Add extension tabs/panels, then host-owned header/footer/badge slots.
+  Delivered: conversation header panels (above), beside the drawer's tabs
+  rather than among them.
 - Define mobile behavior, ordering, conflicts, missing-extension fallback, and
   per-conversation lifecycle context before opening each surface to authors.
 
@@ -271,6 +321,36 @@ steps run against the real backend.
 Changing the mock-LLM feature layout or mapping requires updating
 `.agents/skills/e2e-testing/references/guide.md` in the same change. Before merge,
 run `npm run lint`, `npm test`, `npm run build`, and `npm run build:lib`.
+
+## Invariants
+
+### CX-001: One right-hand panel
+- [x] An App panel never shares the right side with the drawer or the overview.
+
+### CX-002: A panel tab belongs to its conversation
+- [x] A panel tab is mounted for the conversation it is shown in; changing the
+  conversation remounts it.
+
+### CX-003: Panel tab state
+- [x] A panel's selected tab and pins are kept per conversation; whether a
+  panel is open is session-only.
+
+### CX-004: Declared registrations only
+- [x] A registration the manifest does not declare is refused; on an Agent
+  Server without conversation panels the refusal does not fail the App.
+
+### CX-006: Stable test ids for header panels
+- [x] These `data-testid`s are a contract for end-to-end tests; renaming one is
+  a breaking change.
+
+| Element | `data-testid` |
+| --- | --- |
+| A panel's header button (`aria-pressed` while open) | `conversation-app-panel-toggle-{extension}-{panel}` |
+| The open panel (a region named after the panel) | `conversation-app-panel` |
+| One tab in its row | `conversation-app-panel-tab-{tab}` |
+| The ⋯ menu button, and its open and pin rows | `conversation-app-panel-menu-button`, `conversation-app-panel-menu-open-{tab}`, `conversation-app-panel-menu-pin-{tab}` |
+| The mounted tab's container (`data-tab-id` names the tab) | `conversation-app-panel-content` |
+| The narrow-window page, and its back button | `conversation-app-panel-page`, `conversation-app-panel-page-back` |
 
 ## Explicit non-goals for v1
 
