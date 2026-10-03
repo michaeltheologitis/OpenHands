@@ -6,7 +6,7 @@
 // http://localhost:3000/), breaking that resolution; the Node environment
 // has the standard WHATWG URL behavior that honors the file:// base.
 import net from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   copyFileSync,
@@ -1031,6 +1031,16 @@ describe("setup command", () => {
         await delay(10);
       }
     };
+    /**
+     * Whether `pid` has exited, counting a zombie that nobody reaped yet. A
+     * killed child can still be exiting when the command's output closes.
+     */
+    const hasExited = (pid: number) => {
+      const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+        encoding: "utf8",
+      }).stdout.trim();
+      return state === "" || state.startsWith("Z");
+    };
 
     beforeEach(() => {
       logged.length = 0;
@@ -1194,6 +1204,42 @@ describe("setup command", () => {
         });
         expect(() => process.kill(Number(pid), 0)).toThrow(/ESRCH/);
       });
+
+      it.skipIf(process.platform === "win32")(
+        "a command that ignores SIGTERM is killed with SIGKILL 3 s later",
+        async () => {
+          const command = node(
+            'process.on("SIGTERM", () => console.log("ignored SIGTERM")); console.log("ready"); setInterval(() => {}, 1_000)',
+          );
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          await printed(/^ready$/);
+          vi.advanceTimersByTime(200);
+          await printed(/^ignored SIGTERM$/);
+          vi.advanceTimersByTime(3_000);
+          const error = await stopped;
+
+          expect(error).toMatchObject({ reason: "timeout", signal: "SIGKILL" });
+        },
+      );
+
+      it.skipIf(process.platform === "win32")(
+        "the stop reaches the command's background children",
+        async () => {
+          const command = ["sh", "-c", "sleep 300 & echo background $!; wait"];
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, child] = await printed(/^background (\d+)$/);
+          expect(hasExited(Number(child))).toBe(false);
+          vi.advanceTimersByTime(200);
+          const error = await stopped;
+
+          expect(error).toMatchObject({ reason: "timeout" });
+          await expect
+            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
+            .toBe(true);
+        },
+      );
     });
   });
 });
