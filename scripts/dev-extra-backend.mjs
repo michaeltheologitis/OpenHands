@@ -12,6 +12,7 @@ import {
   formatMissingUvxGuidance,
   validateLocalAgentServerPath,
 } from "./dev-safe.mjs";
+import { applyLauncherDefaults } from "./launcher-defaults.mjs";
 import {
   getProcessTreeSpawnOptions,
   isProcessRunning,
@@ -122,6 +123,7 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function main() {
+  applyLauncherDefaults();
   const config = buildExtraBackendConfig();
 
   if (process.env.OH_AGENT_SERVER_LOCAL_PATH) {

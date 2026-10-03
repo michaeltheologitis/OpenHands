@@ -51,6 +51,7 @@ import {
   isPortBusy,
   releaseStaleConversationLeases,
 } from "./dev-safe.mjs";
+import { applyLauncherDefaults } from "./launcher-defaults.mjs";
 import {
   getProcessTreeSpawnOptions,
   isProcessRunning,
@@ -579,6 +580,7 @@ function printBanner(config) {
 
 async function main() {
   const args = parseArgs();
+  applyLauncherDefaults();
   const config = await buildConfig(args);
 
   console.log("");
