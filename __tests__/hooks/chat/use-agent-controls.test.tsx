@@ -16,6 +16,7 @@ import {
   NO_AGENT_CONTROLS,
   useConversationAgentControls,
 } from "#/hooks/chat/use-agent-controls";
+import { useEventStore } from "#/stores/use-event-store";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 
 vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
@@ -102,6 +103,7 @@ describe("useConversationAgentControls", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     __resetActiveStoreForTests();
+    useEventStore.getState().clearEvents();
   });
 
   it("offers the newest report's commands and its options except the model", async () => {
@@ -114,6 +116,34 @@ describe("useConversationAgentControls", () => {
     );
     expect(result.current.options.map(({ id }) => id)).toEqual(["profile"]);
     expect(result.current.isLoading).toBe(false);
+  });
+
+  // An agent-server publishes a start's first report before the agent has
+  // sent its menu; the menu follows in a later report.
+  it("shows no agent commands after an empty first report until the agent's menu arrives", async () => {
+    vi.mocked(EventService.searchEvents).mockResolvedValue({
+      items: [{ ...controlsEvent, available_commands: [] }],
+      next_page_id: null,
+    });
+    const { result } = renderControls();
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.commands).toEqual([]);
+    expect(result.current.options.map(({ id }) => id)).toEqual(["profile"]);
+
+    act(() => {
+      useEventStore.getState().clearEventsForConversation("conv-1");
+      useEventStore.getState().addEvent({
+        ...controlsEvent,
+        id: "controls-2",
+        timestamp: "2026-10-01T10:00:01Z",
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.commands.map(({ name }) => name)).toEqual([
+        "summarize",
+      ]),
+    );
   });
 
   // @spec ASC-004 — Only where the agent-server supports them
@@ -195,6 +225,29 @@ describe("useConversationAgentControls", () => {
       expect(displayErrorToast).toHaveBeenCalledWith(
         "profile is fixed once the session has started (it is 'fast')",
       ),
+    );
+  });
+
+  it("never shows a 5xx answer's placeholder detail as the agent's sentence", async () => {
+    const failure = Object.assign(new Error("HTTP request failed (504)"), {
+      name: "HttpError",
+      status: 504,
+      response: {
+        detail: "Internal Server Error",
+        exception: "504: Timed out waiting for the ACP agent",
+      },
+    });
+    vi.spyOn(
+      AgentServerConversationService,
+      "setAcpConfigOption",
+    ).mockRejectedValue(failure);
+    const { result } = renderControls();
+    await waitFor(() => expect(result.current.options).toHaveLength(1));
+
+    act(() => result.current.setOption("profile", "thorough"));
+
+    await waitFor(() =>
+      expect(displayErrorToast).toHaveBeenCalledWith(failure.message),
     );
   });
 });
