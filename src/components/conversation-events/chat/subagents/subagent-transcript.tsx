@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { I18nKey } from "#/i18n/declaration";
+import type { ACPSessionTextEvent } from "#/types/agent-server/core/events/acp-subagent-event";
 import { MarkdownRenderer } from "#/components/features/markdown/markdown-renderer";
 import {
   compareTimestamps,
@@ -50,8 +51,15 @@ const keyOf = (entry: TranscriptEntry) => {
   return entry.key;
 };
 
+// Every entry selects its own record and is memoized, so a child's new event
+// re-renders its transcript list and the one entry it changed, not the rest.
+
 /** The child's task: its parent's first message to it, else its description. */
-function SubagentTask({ sessionId }: { sessionId: string }) {
+const SubagentTask = React.memo(function SubagentTask({
+  sessionId,
+}: {
+  sessionId: string;
+}) {
   const { t } = useTranslation("openhands");
   const latest = useSubagents((index) => index.children.get(sessionId)?.latest);
   const task = useSubagents((index) => {
@@ -69,9 +77,9 @@ function SubagentTask({ sessionId }: { sessionId: string }) {
       <MarkdownRenderer>{text}</MarkdownRenderer>
     </div>
   );
-}
+});
 
-function TranscriptToolCall({
+const TranscriptToolCall = React.memo(function TranscriptToolCall({
   callKey,
   depth,
 }: {
@@ -80,10 +88,10 @@ function TranscriptToolCall({
 }) {
   const event = useSubagents((index) => index.toolCalls.get(callKey)?.latest);
   return event ? <AcpToolCallCell event={event} depth={depth} /> : null;
-}
+});
 
 /** "To …" for what the child sent, "From …" for what it received. */
-function TranscriptMessage({
+const TranscriptMessage = React.memo(function TranscriptMessage({
   messageKey,
   sessionId,
 }: {
@@ -121,7 +129,20 @@ function TranscriptMessage({
       <MarkdownRenderer>{message.text}</MarkdownRenderer>
     </div>
   );
-}
+});
+
+/** One run of the child's own text, or its reasoning, collapsed. */
+const TranscriptText = React.memo(function TranscriptText({
+  event,
+}: {
+  event: ACPSessionTextEvent;
+}) {
+  return event.thought ? (
+    <CollapsibleThinking content={event.text} />
+  ) : (
+    <MarkdownRenderer>{event.text}</MarkdownRenderer>
+  );
+});
 
 /** A child's task, then its entries and anchored children, in log order. */
 export function SubagentTranscript({
@@ -157,11 +178,7 @@ export function SubagentTranscript({
           <TranscriptMessage messageKey={entry.key} sessionId={sessionId} />
         );
       case "text":
-        return entry.event.thought ? (
-          <CollapsibleThinking content={entry.event.text} />
-        ) : (
-          <MarkdownRenderer>{entry.event.text}</MarkdownRenderer>
-        );
+        return <TranscriptText event={entry.event} />;
       default:
         return (
           <ul>
