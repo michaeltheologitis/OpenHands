@@ -1,0 +1,67 @@
+import { useQuery } from "@tanstack/react-query";
+import {
+  ACP_SESSION_CONTROLS_EVENT_KIND,
+  type ACPSessionControlsEvent,
+} from "@openhands/typescript-client";
+import EventService from "#/api/event-service/event-service.api";
+import { useActiveBackend } from "#/contexts/active-backend-context";
+import { ACP_SESSION_CONTROLS_QUERY_KEYS } from "#/hooks/query/query-keys";
+import { useEventStore, type OHEvent } from "#/stores/use-event-store";
+import { isACPSessionControlsEvent } from "#/types/agent-server/type-guards";
+import type { OpenHandsEvent } from "#/types/agent-server/core";
+
+function newestControlsEvent(
+  events: readonly OHEvent[],
+): ACPSessionControlsEvent | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as OpenHandsEvent;
+    if (isACPSessionControlsEvent(event)) return event;
+  }
+  return null;
+}
+
+/**
+ * The conversation's newest `ACPSessionControlsEvent`: the newer, by
+ * timestamp, of the event store's newest one (live and preloaded events) and
+ * one REST search for it by kind, which finds it however long ago it was sent.
+ * Replaced, never merged: each event carries both lists in full.
+ */
+export function useLatestAcpSessionControls(
+  conversationId: string | null,
+  enabled: boolean,
+): ACPSessionControlsEvent | null {
+  const { backend } = useActiveBackend();
+  const live = useEventStore((state) =>
+    enabled && state.loadedConversationId === conversationId
+      ? newestControlsEvent(state.events)
+      : null,
+  );
+  const { data: searched } = useQuery({
+    queryKey: ACP_SESSION_CONTROLS_QUERY_KEYS.latest(
+      backend.id,
+      conversationId ?? "",
+    ),
+    queryFn: async () => {
+      const page = await EventService.searchEvents(
+        conversationId!,
+        null,
+        null,
+        {
+          kind: ACP_SESSION_CONTROLS_EVENT_KIND,
+          sortOrder: "TIMESTAMP_DESC",
+          limit: 1,
+        },
+      );
+      return newestControlsEvent([...page.items].reverse());
+    },
+    enabled: enabled && !!conversationId,
+    staleTime: Infinity,
+    retry: false,
+    meta: { disableToast: true },
+  });
+
+  if (!enabled) return null;
+  const rest = searched ?? null;
+  if (!live || !rest) return live ?? rest;
+  return (rest.timestamp ?? "") > (live.timestamp ?? "") ? rest : live;
+}

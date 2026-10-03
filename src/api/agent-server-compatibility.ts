@@ -201,6 +201,18 @@ export function isSdkHttpStatusError(error: unknown, status: number): boolean {
   );
 }
 
+/**
+ * The agent-server's `detail` sentence from an SDK HTTP error (for example an
+ * ACP agent's own reason for refusing a config option value), or null.
+ */
+export function getSdkHttpErrorDetail(error: unknown): string | null {
+  if (!isSdkHttpError(error)) return null;
+  const { response } = error as { response?: unknown };
+  if (typeof response !== "object" || response === null) return null;
+  const { detail } = response as { detail?: unknown };
+  return typeof detail === "string" ? detail : null;
+}
+
 function normalizeAgentServerInfoVersion(version: unknown): string | null {
   if (typeof version !== "string") return null;
   const trimmed = version.trim();

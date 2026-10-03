@@ -5,6 +5,7 @@ import {
   type SlashCommandItem,
   useSlashCommand,
 } from "#/hooks/chat/use-slash-command";
+import type { ACPAvailableCommand } from "@openhands/typescript-client";
 import { ActiveBackendProvider } from "#/contexts/active-backend-context";
 import {
   __resetActiveStoreForTests,
@@ -851,5 +852,112 @@ describe("useSlashCommand", () => {
     act(() => result.current.closeMenu());
 
     expect(result.current.isMenuOpen).toBe(false);
+  });
+
+  // @spec ASC-001 — The slash menu lists the agent's current commands
+  describe("agent commands", () => {
+    const summarize: ACPAvailableCommand = {
+      name: "summarize",
+      description: "Summarize the input",
+    };
+    const compare: ACPAvailableCommand = {
+      name: "compare",
+      description: "Compare two things",
+      input: { hint: "what to compare" },
+    };
+
+    const renderWithAgentCommands = (agentCommands: ACPAvailableCommand[]) =>
+      renderHook(
+        ({ commands }) =>
+          useSlashCommand(makeChatInputRef(), { agentCommands: commands }),
+        { initialProps: { commands: agentCommands } },
+      );
+
+    it("lists the agent's commands between the built-ins and the skills, with their input hints", () => {
+      mockSkills.data = [makeSkill("explicit", ["/explicit"])];
+
+      const { result } = renderWithAgentCommands([summarize, compare]);
+
+      expect(result.current.filteredItems.map((item) => item.command)).toEqual([
+        "/btw",
+        "/model",
+        "/goal",
+        "/plan",
+        "/code",
+        "/summarize",
+        "/compare",
+        "/explicit",
+      ]);
+      expect(
+        result.current.filteredItems.map((item) => item.inputHint ?? null),
+      ).toEqual([null, null, null, null, null, null, "what to compare", null]);
+    });
+
+    it("drops an item whose command repeats an earlier one, keeping the earlier", () => {
+      mockSkills.data = [makeSkill("summarize-skill", ["/summarize"])];
+
+      const { result } = renderWithAgentCommands([
+        { name: "plan", description: "The agent's plan" },
+        summarize,
+        { name: "summarize", description: "A second summarize" },
+      ]);
+
+      const commands = result.current.filteredItems.map((item) => item.command);
+      expect(commands.filter((command) => command === "/plan")).toHaveLength(1);
+      expect(
+        result.current.filteredItems.filter(
+          (item) => item.command === "/summarize",
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          skill: expect.objectContaining({
+            description: "Summarize the input",
+          }),
+        }),
+      ]);
+      expect(
+        result.current.filteredItems.find((item) => item.command === "/plan")
+          ?.skill.description,
+      ).not.toBe("The agent's plan");
+    });
+
+    it("replaces the agent's commands with each new report", () => {
+      const builtIns = ["/btw", "/model", "/goal", "/plan", "/code"];
+      const { result, rerender } = renderWithAgentCommands([
+        summarize,
+        compare,
+      ]);
+      const listed = () =>
+        result.current.filteredItems.map((item) => item.command);
+
+      rerender({ commands: [summarize] });
+      expect(listed()).toEqual([...builtIns, "/summarize"]);
+
+      rerender({ commands: [] });
+      expect(listed()).toEqual(builtIns);
+    });
+
+    it("lists the agent's commands before the skills have loaded", () => {
+      mockSkills.isLoading = true;
+
+      const { result } = renderWithAgentCommands([summarize]);
+
+      expect(
+        result.current.filteredItems.map((item) => item.command),
+      ).toContain("/summarize");
+    });
+
+    it("inserts the agent command's name followed by a space", () => {
+      const ref = makeChatInputRef();
+      setInputText(ref.current, "/comp");
+      const { result } = renderHook(() =>
+        useSlashCommand(ref, { agentCommands: [compare] }),
+      );
+      act(() => result.current.updateSlashMenu());
+
+      act(() => result.current.selectItem(result.current.filteredItems[0]));
+
+      expect(ref.current.textContent).toBe("/compare ");
+    });
   });
 });

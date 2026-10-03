@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import type { ACPAvailableCommand } from "@openhands/typescript-client";
 import { useConversationSkills } from "#/hooks/query/use-conversation-skills";
 import { SkillInfo } from "#/types/settings";
 import { BUILT_IN_COMMANDS, MODEL_COMMAND } from "#/utils/constants";
@@ -13,6 +14,43 @@ export interface SlashCommandItem {
   skill: SlashCommandSkill;
   /** The slash command string, e.g. "/random-number" */
   command: string;
+  /** What an agent command takes after its name, shown in its menu row. */
+  inputHint?: string;
+}
+
+export interface UseSlashCommandOptions {
+  /** The agent's own commands, newest report; replaced, never merged. */
+  agentCommands?: ACPAvailableCommand[];
+}
+
+const NO_AGENT_COMMANDS: ACPAvailableCommand[] = [];
+
+/** An ACP agent's command as a slash menu item, the way built-ins are built. */
+export function toAgentSlashCommandItem(
+  command: ACPAvailableCommand,
+): SlashCommandItem {
+  const slashCommand = `/${command.name}`;
+  return {
+    command: slashCommand,
+    skill: {
+      name: command.name,
+      type: "agentskills",
+      source: null,
+      description: command.description,
+      triggers: [slashCommand],
+    },
+    ...(command.input?.hint ? { inputHint: command.input.hint } : {}),
+  };
+}
+
+/** Keep the first item of each command: built-ins, then agent, then skills. */
+function withoutRepeatedCommands(items: SlashCommandItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.command)) return false;
+    seen.add(item.command);
+    return true;
+  });
 }
 
 type SlashCompletionKind = "command" | "model-profile";
@@ -35,6 +73,7 @@ function getCursorOffset(element: HTMLElement): number {
  */
 export const useSlashCommand = (
   chatInputRef: React.RefObject<HTMLDivElement | null>,
+  { agentCommands = NO_AGENT_COMMANDS }: UseSlashCommandOptions = {},
 ) => {
   // Scope the skill catalog to this conversation's attached workspace so the
   // slash menu lists the same project skills that were loaded into it.
@@ -48,22 +87,28 @@ export const useSlashCommand = (
     useState<SlashCompletionKind>("command");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // Build slash command items from built-in commands + skills:
+  // Build slash command items from built-in commands, the agent's commands
+  // and skills, in that order:
   // - Built-in commands (like /new) are included for V1 conversations
   // - /new is cloud-only — local backends don't surface it
   // - /model lists/switches LLM profiles; both local and cloud support them
+  // - An ACP agent's own commands follow, replaced on every report; they do
+  //   not wait for skills
   // - Skills with explicit "/" triggers use those triggers
   // - AgentSkills without "/" triggers get a derived "/<name>" command
+  // A built-in is intercepted before sending, so a later item repeating a
+  // command could never run as listed; it is dropped.
+  // @spec ASC-001 — The slash menu lists the agent's current commands
   const slashItems = useMemo(() => {
     const items: SlashCommandItem[] = BUILT_IN_COMMANDS.filter((cmd) => {
       if (cmd.command === "/new") return isCloud;
       return true;
     });
+    items.push(...agentCommands.map(toAgentSlashCommandItem));
 
-    // Wait for skills to finish initial load so all commands appear together
-    if (isSkillsLoading) return items;
+    // Wait for skills to finish initial load so all skills appear together
+    if (isSkillsLoading || !skills) return withoutRepeatedCommands(items);
 
-    if (!skills) return items;
     skills.forEach((skill) => {
       const triggers = skill.triggers || [];
       const slashTriggers = triggers.filter((t) => t.startsWith("/"));
@@ -78,8 +123,8 @@ export const useSlashCommand = (
         items.push({ skill, command: `/${skill.name}` });
       }
     });
-    return items;
-  }, [skills, isSkillsLoading, isCloud]);
+    return withoutRepeatedCommands(items);
+  }, [skills, isSkillsLoading, isCloud, agentCommands]);
 
   const modelProfileItems = useMemo<SlashCommandItem[]>(() => {
     return (profilesData?.profiles ?? []).map((profile) => {

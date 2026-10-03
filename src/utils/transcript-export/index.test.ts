@@ -151,6 +151,24 @@ describe("conversation transcript export", () => {
     expect(markdown).toContain("## Assistant");
   });
 
+  it("leaves the agent's commands and options reports out of the export", () => {
+    const controls = {
+      id: "controls-1",
+      kind: "ACPSessionControlsEvent",
+      timestamp: "2026-10-01T00:00:00Z",
+      source: "agent",
+      available_commands: [{ name: "summarize", description: "Summarize" }],
+      config_options: [],
+    } as unknown as MessageEvent;
+
+    expect(
+      eventsToMarkdown(
+        [userMessage, controls, assistantMessage],
+        defaultOptions,
+      ),
+    ).toBe(eventsToMarkdown([userMessage, assistantMessage], defaultOptions));
+  });
+
   it("honors tool-detail and timestamp options in both formats", () => {
     const events = [userMessage, terminalAction, terminalObservation("passed")];
     const options = {

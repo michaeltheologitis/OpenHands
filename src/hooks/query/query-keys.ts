@@ -3,6 +3,8 @@
  * Using constants ensures type safety and prevents typos.
  */
 
+import type { ACPConfigOptionValues } from "@openhands/typescript-client";
+import type { WorkspaceMode } from "#/api/conversation-metadata-store";
 import { SettingsScope } from "#/types/settings";
 
 export const QUERY_KEYS = {
@@ -90,6 +92,26 @@ export const CANVAS_EXTENSIONS_QUERY_KEYS = {
       extensionName,
       resolvedRef,
       panelId,
+    ] as const,
+} as const;
+
+export const ACP_SESSION_CONTROLS_QUERY_KEYS = {
+  all: ["acp-session-controls"] as const,
+  latest: (backendId: string, conversationId: string) =>
+    ["acp-session-controls", "latest", backendId, conversationId] as const,
+  preview: (
+    launchKey: string,
+    workingDir: string | null,
+    workspaceMode: WorkspaceMode | null,
+    values: ACPConfigOptionValues,
+  ) =>
+    [
+      "acp-session-controls",
+      "preview",
+      launchKey,
+      workingDir,
+      workspaceMode,
+      values,
     ] as const,
 } as const;
 

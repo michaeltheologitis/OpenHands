@@ -20,6 +20,8 @@ export interface EventSearchOptions {
   timestampGte?: string;
   /** Filter: event timestamp < this value (ISO 8601). */
   timestampLt?: string;
+  /** Filter: only events of this kind, as the server's search matches it. */
+  kind?: string;
   /**
    * Surface unsupported cloud pagination instead of degrading to an empty
    * page. Callers that require a complete result (such as transcript export)

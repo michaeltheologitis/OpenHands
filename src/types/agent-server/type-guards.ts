@@ -37,6 +37,7 @@ import { ACPToolCallEvent } from "./core/events/acp-tool-call-event";
 import { StreamingDeltaEvent } from "./core/events/streaming-delta-event";
 import { SystemPromptEvent } from "./core/events/system-event";
 import { CondensationEvent } from "./core/events/condensation-event";
+import type { ACPSessionControlsEvent } from "./core/events/acp-session-controls-event";
 
 /**
  * Type guard to check if an unknown value is a valid BaseEvent
@@ -310,3 +311,8 @@ export const isCondensationEvent = (
 export function isAgentServerEvent(event: unknown): event is OpenHandsEvent {
   return isBaseEvent(event);
 }
+
+export const isACPSessionControlsEvent = (
+  event: OpenHandsEvent,
+): event is ACPSessionControlsEvent =>
+  "kind" in event && event.kind === "ACPSessionControlsEvent";

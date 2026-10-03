@@ -5,6 +5,7 @@ import { useGripResize } from "#/hooks/chat/use-grip-resize";
 import { useChatInputEvents } from "#/hooks/chat/use-chat-input-events";
 import { useChatSubmission } from "#/hooks/chat/use-chat-submission";
 import { useSlashCommand } from "#/hooks/chat/use-slash-command";
+import type { AgentControls } from "#/hooks/chat/use-agent-controls";
 import { ChatInputGrip } from "./components/chat-input-grip";
 import { ChatInputContainer } from "./components/chat-input-container";
 import { HiddenFileInput } from "./components/hidden-file-input";
@@ -27,6 +28,8 @@ export interface CustomChatInputProps {
   ) => void;
   className?: React.HTMLAttributes<HTMLDivElement>["className"];
   buttonClassName?: React.HTMLAttributes<HTMLButtonElement>["className"];
+  /** The agent's slash commands and option pickers, from the composer's owner. */
+  agentControls?: AgentControls;
 }
 
 export function CustomChatInput({
@@ -41,6 +44,7 @@ export function CustomChatInput({
   onFilesPaste,
   className = "",
   buttonClassName = "",
+  agentControls,
 }: CustomChatInputProps) {
   const [canSubmit, setCanSubmit] = React.useState(false);
   const {
@@ -153,7 +157,9 @@ export function CustomChatInput({
     selectItem: selectSlashItem,
     handleSlashKeyDown,
     closeMenu: closeSlashMenu,
-  } = useSlashCommand(chatInputRef as React.RefObject<HTMLDivElement | null>);
+  } = useSlashCommand(chatInputRef as React.RefObject<HTMLDivElement | null>, {
+    agentCommands: agentControls?.commands,
+  });
 
   // Cleanup: reset suggestions visibility when component unmounts
   useEffect(
@@ -223,6 +229,7 @@ export function CustomChatInput({
           slashItems={slashItems}
           slashSelectedIndex={slashSelectedIndex}
           onSlashSelect={selectSlashItem}
+          agentControls={agentControls}
         />
       </div>
     </div>
