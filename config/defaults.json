@@ -7,8 +7,9 @@
   },
   "sources": {
     "_comment": "Optional agent-server source for the npm and desktop launchers (scripts/launcher-defaults.mjs; Docker ignores it), so a build can run a fork of the SDK without environment variables. Fallbacks for OH_AGENT_SERVER_GIT_REPO (an https:// or ssh:// URL) and OH_AGENT_SERVER_GIT_REF: environment variables still win, and the ref applies only when the environment names no agent-server source. A full 40-hex commit is installed once and then reused offline; any other ref is refetched on every launch. null means unset: the agent-server comes from PyPI at versions.agentServer. Everything in this file is also compiled into the frontend bundle, so it must never hold a secret.",
-    "agentServerGitRepo": null,
-    "agentServerGitRef": null
+    "agentServerGitRepo": "https://github.com/michaeltheologitis/software-agent-sdk",
+    "_agentServerGitRefComment": "tag dr-1 of michaeltheologitis/software-agent-sdk",
+    "agentServerGitRef": "cef3b24198070efb2c38ab8b1aca2f24836eecbd"
   },
   "compatibility": {
     "minimumAgentServer": "1.47.0"
