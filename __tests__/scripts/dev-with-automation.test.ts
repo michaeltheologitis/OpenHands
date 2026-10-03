@@ -24,7 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it, afterEach, beforeEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
 import {
   buildAgentServerAutomationEnv,
   buildAutomationCommand,
@@ -1021,6 +1021,16 @@ describe("setup command", () => {
       });
     const linesOf = (name: string) =>
       logged.filter((entry) => entry.name === name).map((entry) => entry.line);
+    /** The first match of `pattern` in the command's output, once printed. */
+    const printed = async (pattern: RegExp) => {
+      for (;;) {
+        const match = logged
+          .map((entry) => entry.line.match(pattern))
+          .find(Boolean);
+        if (match) return match;
+        await delay(10);
+      }
+    };
 
     beforeEach(() => {
       logged.length = 0;
@@ -1157,22 +1167,33 @@ describe("setup command", () => {
       });
     });
 
-    it("a command still running at its timeout is stopped and rejects", async () => {
-      const command = node(
-        "console.log(`pid ${process.pid}`); setInterval(() => {}, 1_000)",
-      );
-
-      const error = await run(command, { timeoutMs: 200 }).catch((e) => e);
-
-      expect(error).toMatchObject({
-        message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
-        reason: "timeout",
+    describe("at its timeout", () => {
+      // The timeout runs out when the test advances the clock, once the
+      // command has printed what the test needs, however slowly it started.
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       });
-      const pidLine = linesOf("setup before-start").find((line) =>
-        line.startsWith("pid "),
-      );
-      const pid = Number(pidLine?.slice("pid ".length));
-      expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("a command still running at its timeout is stopped and rejects", async () => {
+        const command = node(
+          "console.log(`pid ${process.pid}`); setInterval(() => {}, 1_000)",
+        );
+
+        const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+        const [, pid] = await printed(/^pid (\d+)$/);
+        vi.advanceTimersByTime(200);
+        const error = await stopped;
+
+        expect(error).toMatchObject({
+          message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+          reason: "timeout",
+        });
+        expect(() => process.kill(Number(pid), 0)).toThrow(/ESRCH/);
+      });
     });
   });
 });
