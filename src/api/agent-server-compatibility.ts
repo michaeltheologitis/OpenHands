@@ -201,16 +201,41 @@ export function isSdkHttpStatusError(error: unknown, status: number): boolean {
   );
 }
 
+const FIRST_SERVER_ERROR_STATUS = 500;
+
+/** An SDK HTTP error's status and JSON body (empty when it has none), or null. */
+function readSdkHttpError(error: unknown) {
+  if (!isSdkHttpError(error)) return null;
+  const { status, response } = error as { status: number; response?: unknown };
+  const body =
+    typeof response === "object" && response !== null
+      ? (response as Record<string, unknown>)
+      : {};
+  return { status, body };
+}
+
+const asText = (value: unknown) => (typeof value === "string" ? value : null);
+
 /**
  * The agent-server's `detail` sentence from an SDK HTTP error (for example an
- * ACP agent's own reason for refusing a config option value), or null.
+ * ACP agent's own reason for refusing a config option value), or null. A 5xx
+ * answer has none: the agent-server's error handler always sets its `detail`
+ * to "Internal Server Error".
  */
 export function getSdkHttpErrorDetail(error: unknown): string | null {
-  if (!isSdkHttpError(error)) return null;
-  const { response } = error as { response?: unknown };
-  if (typeof response !== "object" || response === null) return null;
-  const { detail } = response as { detail?: unknown };
-  return typeof detail === "string" ? detail : null;
+  const answer = readSdkHttpError(error);
+  if (!answer || answer.status >= FIRST_SERVER_ERROR_STATUS) return null;
+  return asText(answer.body.detail);
+}
+
+/**
+ * Why the agent-server answered a 5xx, which its error handler moves under
+ * `exception` (for example "503: Canvas App backend is not ready"), or null.
+ */
+export function getSdkHttpServerErrorReason(error: unknown): string | null {
+  const answer = readSdkHttpError(error);
+  if (!answer || answer.status < FIRST_SERVER_ERROR_STATUS) return null;
+  return asText(answer.body.exception);
 }
 
 function normalizeAgentServerInfoVersion(version: unknown): string | null {

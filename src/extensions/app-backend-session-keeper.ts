@@ -1,5 +1,5 @@
 import {
-  getSdkHttpErrorDetail,
+  getSdkHttpServerErrorReason,
   isSdkHttpStatusError,
 } from "#/api/agent-server-compatibility";
 import type { Backend } from "#/api/backend-registry/types";
@@ -74,11 +74,11 @@ export function toAppBackendError(
   extensionName: string,
 ): CanvasExtensionAppBackendError {
   if (isSdkHttpStatusError(error, SERVICE_UNAVAILABLE)) {
-    const detail = getSdkHttpErrorDetail(error) ?? "";
-    if (/not ready/i.test(detail)) {
+    const reason = getSdkHttpServerErrorReason(error) ?? "";
+    if (/not ready/i.test(reason)) {
       return appBackendError("not-ready", extensionName);
     }
-    if (/ingress/i.test(detail)) {
+    if (/ingress/i.test(reason)) {
       return appBackendError("no-ingress", extensionName);
     }
   }

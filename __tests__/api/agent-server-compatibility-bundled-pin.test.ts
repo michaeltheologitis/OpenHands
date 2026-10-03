@@ -512,6 +512,13 @@ describe("getSdkHttpErrorDetail", () => {
   it.each([
     ["a validation error list", sdkError(422, { detail: [{ msg: "x" }] })],
     ["a body without detail", sdkError(502, null)],
+    [
+      "a 5xx answer, whose detail is the agent-server's placeholder",
+      sdkError(504, {
+        detail: "Internal Server Error",
+        exception: "504: Timed out waiting for the ACP agent",
+      }),
+    ],
     ["an error that is not an SDK HTTP error", new Error("offline")],
   ])("is null for %s", (_label, error) => {
     expect(getSdkHttpErrorDetail(error)).toBeNull();

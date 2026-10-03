@@ -40,11 +40,17 @@ const local: Backend = {
 
 const owner = { backend: local, extensionName: "library" };
 
-const httpError = (status: number, detail: string) =>
+// The agent-server's own error bodies: a 4xx carries the route's reason as
+// `detail`; a 5xx carries "Internal Server Error" there and the reason under
+// `exception`.
+const httpError = (status: number, reason: string) =>
   Object.assign(new Error(`HTTP ${status}`), {
     name: "HttpError",
     status,
-    response: { detail },
+    response:
+      status >= 500
+        ? { detail: "Internal Server Error", exception: `${status}: ${reason}` }
+        : { detail: reason },
   });
 
 function serveBridge(ingress: string | null = INGRESS) {
