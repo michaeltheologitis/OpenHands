@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import {
   clearConversationLocalStorage,
   getConversationState,
   isTaskConversationId,
   setConversationState,
+  useConversationLocalStorageState,
   LOCAL_STORAGE_KEYS,
 } from "#/utils/conversation-local-storage";
 
@@ -66,9 +68,9 @@ describe("conversation localStorage utilities", () => {
     });
 
     it("defaults rightPanelShown to false and drops corrupt values", () => {
-      expect(getConversationState("conv-right-panel-default").rightPanelShown).toBe(
-        false,
-      );
+      expect(
+        getConversationState("conv-right-panel-default").rightPanelShown,
+      ).toBe(false);
 
       const conversationId = "conv-right-panel-corrupt";
       const key = `${LOCAL_STORAGE_KEYS.CONVERSATION_STATE}-${conversationId}`;
@@ -153,7 +155,12 @@ describe("conversation localStorage utilities", () => {
     it("persists and sanitizes unpinnedOverviewSections", () => {
       const conversationId = "conv-overview-pins";
       setConversationState(conversationId, {
-        unpinnedOverviewSections: ["skills", "not-a-section", "mcp", "workspace"],
+        unpinnedOverviewSections: [
+          "skills",
+          "not-a-section",
+          "mcp",
+          "workspace",
+        ],
       });
 
       const state = getConversationState(conversationId);
@@ -687,6 +694,71 @@ describe("conversation localStorage utilities", () => {
       expect(state.filesTabTreeVisible).toBe(true);
       expect(state.filesTabOpenPaths).toEqual(["ok.ts"]);
       expect(state.filesTabSelectedPath).toBeNull();
+    });
+  });
+
+  // @spec CX-003 — A panel's selected tab and pins are kept per conversation
+  describe("appPanelTabs", () => {
+    const CONVERSATION_ID = "conv-app-panels";
+    const storageKey = `${LOCAL_STORAGE_KEYS.CONVERSATION_STATE}-${CONVERSATION_ID}`;
+    const storeRaw = (appPanelTabs: unknown) =>
+      localStorage.setItem(storageKey, JSON.stringify({ appPanelTabs }));
+
+    it("round-trips each panel's selected tab and unpinned tabs", () => {
+      const appPanelTabs = {
+        "demo/panel": { selectedTab: "details", unpinnedTabs: ["overview"] },
+      };
+
+      setConversationState(CONVERSATION_ID, { appPanelTabs });
+
+      expect(getConversationState(CONVERSATION_ID).appPanelTabs).toEqual(
+        appPanelTabs,
+      );
+    });
+
+    it.each([
+      { stored: "not-an-object", expected: undefined },
+      { stored: ["demo/panel"], expected: undefined },
+      { stored: { "demo/panel": "details" }, expected: {} },
+      {
+        stored: { "demo/panel": { selectedTab: 3, unpinnedTabs: ["a"] } },
+        expected: { "demo/panel": { selectedTab: null, unpinnedTabs: ["a"] } },
+      },
+      {
+        stored: { "demo/panel": { selectedTab: "a", unpinnedTabs: "b" } },
+        expected: { "demo/panel": { selectedTab: "a", unpinnedTabs: [] } },
+      },
+      {
+        stored: { "demo/panel": { selectedTab: "a", unpinnedTabs: ["b", 4] } },
+        expected: { "demo/panel": { selectedTab: "a", unpinnedTabs: ["b"] } },
+      },
+    ])("sanitizes a stored $stored", ({ stored, expected }) => {
+      storeRaw(stored);
+
+      expect(getConversationState(CONVERSATION_ID).appPanelTabs).toEqual(
+        expected,
+      );
+    });
+
+    it("writes one panel's state without dropping another panel's", () => {
+      storeRaw({
+        "gone/panel": { selectedTab: "old", unpinnedTabs: ["x"] },
+      });
+      const { result } = renderHook(() =>
+        useConversationLocalStorageState(CONVERSATION_ID),
+      );
+
+      act(() => {
+        result.current.setAppPanelTabState?.("demo/panel", {
+          selectedTab: "details",
+          unpinnedTabs: [],
+        });
+      });
+
+      expect(getConversationState(CONVERSATION_ID).appPanelTabs).toEqual({
+        "gone/panel": { selectedTab: "old", unpinnedTabs: ["x"] },
+        "demo/panel": { selectedTab: "details", unpinnedTabs: [] },
+      });
     });
   });
 });

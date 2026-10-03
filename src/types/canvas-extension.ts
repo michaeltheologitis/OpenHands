@@ -9,8 +9,29 @@ export interface CanvasExtensionPageContribution {
   description?: string | null;
 }
 
+export interface CanvasExtensionPanelTabContribution {
+  /** Contribution id; the id the App registers this tab's page under. */
+  id: string;
+  /** Label in the panel's tab row. */
+  title: string;
+  /** "/" or an absolute kebab-case path; where the tab's page starts. */
+  path: string;
+}
+
+export interface CanvasExtensionConversationPanelContribution {
+  /** Contribution id of the panel. */
+  id: string;
+  /** Tooltip "Show <title>" and the panel's accessible name. */
+  title: string;
+  /** Package-relative .svg or .png for the header button. */
+  icon?: string | null;
+  /** The panel's tabs, in tab-row order; never empty. */
+  tabs: CanvasExtensionPanelTabContribution[];
+}
+
 export interface CanvasExtensionContributions {
   pages?: CanvasExtensionPageContribution[] | null;
+  conversation_panels?: CanvasExtensionConversationPanelContribution[] | null;
 }
 
 /** Parsed contents of `canvas-extension.json`. */
@@ -48,11 +69,33 @@ export interface InstallCanvasExtensionRequest {
 
 export type CanvasExtensionDispose = () => void;
 
+export interface CanvasExtensionPageSurface {
+  kind: "page";
+}
+
+export interface CanvasExtensionConversationPanelSurface {
+  kind: "conversation-panel";
+  /** The panel's contribution id. */
+  panelId: string;
+  /** The tab's contribution id. */
+  tabId: string;
+  /** Select another tab of this panel, as a click on it would. */
+  selectTab: (tabId: string) => void;
+}
+
+export type CanvasExtensionMountSurface =
+  | CanvasExtensionPageSurface
+  | CanvasExtensionConversationPanelSurface;
+
 export interface CanvasExtensionPageMountContext {
   container: HTMLElement;
-  /** Remainder of the route below the page contribution's declared path. */
+  /** Remainder of the route below the page's path, or the tab's path without its leading "/". */
   path: string;
   navigate: (path: string) => void;
+  /** The conversation a panel is shown for; null on a routed page. */
+  conversationId: string | null;
+  /** Where the page is mounted. */
+  surface: CanvasExtensionMountSurface;
 }
 
 export type CanvasExtensionPageMount = (
