@@ -4,6 +4,7 @@ import { localAgentServerHasCapability } from "#/api/agent-server-compatibility"
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
 import { useActiveBackend } from "#/contexts/active-backend-context";
 import { loadCanvasExtensionModule } from "#/extensions/canvas-extension-module-loader";
+import { mountAppBackendFrame } from "#/extensions/mount-app-backend-frame";
 import { useCanvasExtensions } from "#/hooks/query/use-canvas-extensions";
 import {
   CANVAS_EXTENSION_HOST_API_VERSION,
@@ -371,6 +372,14 @@ export function CanvasExtensionsRuntimeProvider({
           agentServer: {
             request: (request) =>
               CanvasExtensionsService.requestAgentServer(request, backend),
+          },
+          appBackend: {
+            mountFrame: (container, options) =>
+              mountAppBackendFrame(
+                { backend, extensionName: extension.name },
+                container,
+                options,
+              ),
           },
         };
 

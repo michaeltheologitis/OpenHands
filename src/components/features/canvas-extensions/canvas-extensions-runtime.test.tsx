@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
 import { localAgentServerHasCapability } from "#/api/agent-server-compatibility";
+import { mountAppBackendFrame } from "#/extensions/mount-app-backend-frame";
 import {
   setActiveSelection,
   setRegisteredBackends,
@@ -18,6 +19,10 @@ import {
   CanvasExtensionsRuntimeProvider,
   useCanvasExtensionsRuntime,
 } from "./canvas-extensions-runtime";
+
+vi.mock("#/extensions/mount-app-backend-frame", () => ({
+  mountAppBackendFrame: vi.fn(() => () => undefined),
+}));
 
 vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
   ...(await importOriginal<
@@ -344,5 +349,29 @@ describe("CanvasExtensionsRuntimeProvider", () => {
 
       await waitFor(() => expect(moduleLoader).toHaveBeenCalledTimes(2));
     });
+  });
+
+  it("gives each App a frame mounter bound to that App and its backend", async () => {
+    const container = document.createElement("div");
+    const onError = vi.fn();
+    const moduleLoader = vi.fn().mockResolvedValue({
+      activate: (host: CanvasExtensionHost) => {
+        host.registerPage("dashboard", () => undefined);
+        host.appBackend.mountFrame(container, { title: "Dashboard", onError });
+      },
+    });
+
+    renderRuntime(moduleLoader);
+
+    await waitFor(() =>
+      expect(mountAppBackendFrame).toHaveBeenCalledWith(
+        {
+          backend: expect.objectContaining({ id: backend.id }),
+          extensionName: extension.name,
+        },
+        container,
+        { title: "Dashboard", onError },
+      ),
+    );
   });
 });
