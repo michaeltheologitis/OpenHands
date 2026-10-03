@@ -34,6 +34,7 @@ import {
   expandAllSubagents,
   probeScrollResponsiveness,
   readRenderedSubagentTree,
+  readStoredEvents,
   readStoredSubagentTree,
   startConversation,
   waitForTurnsToEnd,
@@ -164,11 +165,12 @@ test.describe("ACP sub-agent sessions", () => {
     test.setTimeout(120_000);
     await routeSessionApiKey(page);
     await page.goto(`/conversations/${conversationId}`);
-    await expect(page.getByTestId("subagent-block-toggle").first()).toHaveText(
-      "2 sub-agents · 2 running",
-      { timeout: 30_000 },
-    );
-    await expandAllSubagents(page);
+    const summary = page.getByTestId("subagent-block-toggle").first();
+    await expect(summary).toHaveText("2 sub-agents · 2 running", {
+      timeout: 30_000,
+    });
+    // Opened as a user does, with the pointer, which hover tooltips wait for.
+    await summary.click();
 
     const withheld = stopOf(page, "child-y");
     await expect(withheld).toHaveAttribute("data-subagent-stop", "withheld");
@@ -177,6 +179,8 @@ test.describe("ACP sub-agent sessions", () => {
     await expect(page.getByRole("tooltip")).toHaveText(
       "This agent cannot stop a single sub-agent. Stop ends the whole turn.",
     );
+    await page.mouse.move(0, 0);
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
 
     const stop = stopOf(page, "child-x");
     await expect(stop).toHaveAttribute("data-subagent-stop", "ready");
@@ -191,6 +195,7 @@ test.describe("ACP sub-agent sessions", () => {
     );
     await stop.click();
     await cancelRequest;
+    await expandAllSubagents(page);
 
     await expect(rowOf(page, "child-x")).toHaveAttribute(
       "data-subagent-status",
@@ -330,9 +335,20 @@ test.describe("ACP sub-agent sessions", () => {
     const probe = await probeScrollResponsiveness(page, finished);
 
     await page.evaluate((interval) => window.clearInterval(interval), expander);
-    console.log(`E6 scroll probe: ${JSON.stringify(probe)}`);
-    expect(probe.scrolls).toBeGreaterThan(10);
+    const subagentEvents = (await readStoredEvents(request, id)).filter(
+      ({ kind }) => kind?.startsWith("ACP"),
+    );
+    const seconds =
+      (Date.parse(subagentEvents.at(-1)!.timestamp) -
+        Date.parse(subagentEvents[0].timestamp)) /
+      1000;
+    console.log(
+      `E6: ${subagentEvents.length} ACP events in ${seconds.toFixed(1)} s ` +
+        `(${(subagentEvents.length / seconds).toFixed(1)}/s); ` +
+        `scroll probe ${JSON.stringify(probe)}`,
+    );
     expect(probe.maxScrollLatencyMs).toBeLessThan(SCROLL_LATENCY_LIMIT_MS);
+    expect(probe.scrolls).toBeGreaterThan(10);
     await expect(page.getByTestId("subagent-block-toggle").first()).toHaveText(
       "50 sub-agents · 50 done",
       { timeout: 30_000 },

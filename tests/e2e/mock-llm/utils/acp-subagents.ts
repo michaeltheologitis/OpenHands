@@ -446,6 +446,8 @@ export async function probeScrollResponsiveness(
       latencies: [] as number[],
       longTasks: [] as number[],
       stopped: false,
+      // When the scroll in flight was due; it counts even if never painted.
+      pendingDue: null as number | null,
     };
     (
       window as unknown as { subagentScrollProbe: typeof probe }
@@ -458,6 +460,7 @@ export async function probeScrollResponsiveness(
     const scheduleScroll = () => {
       if (probe.stopped) return;
       const due = performance.now() + intervalMs;
+      probe.pendingDue = due;
       setTimeout(() => {
         // Alternate between the bottom and a point below the top, so the
         // probe never asks for older history.
@@ -468,6 +471,7 @@ export async function probeScrollResponsiveness(
             : scrollHeight;
         requestAnimationFrame(() => {
           probe.latencies.push(performance.now() - due);
+          probe.pendingDue = null;
           scheduleScroll();
         });
       }, intervalMs);
@@ -484,12 +488,16 @@ export async function probeScrollResponsiveness(
           latencies: number[];
           longTasks: number[];
           stopped: boolean;
+          pendingDue: number | null;
         };
       }
     ).subagentScrollProbe;
     probe.stopped = true;
+    // A scroll that was due and never painted is the worst latency of all.
+    const starved =
+      probe.pendingDue === null ? 0 : performance.now() - probe.pendingDue;
     return {
-      maxScrollLatencyMs: Math.max(0, ...probe.latencies),
+      maxScrollLatencyMs: Math.max(0, starved, ...probe.latencies),
       longTasks: probe.longTasks,
       scrolls: probe.latencies.length,
     };
