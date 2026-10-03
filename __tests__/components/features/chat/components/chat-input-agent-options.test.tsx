@@ -80,6 +80,19 @@ describe("ChatInputAgentOptions", () => {
     expect(setOption).toHaveBeenCalledWith("namespace", "course_advisor");
   });
 
+  it("sets nothing when the value in effect is chosen", async () => {
+    const user = userEvent.setup();
+    const { setOption } = renderOptions({ options: [namespace] });
+
+    await user.click(screen.getByTestId("agent-option-namespace"));
+    await user.click(screen.getByTestId("agent-option-namespace-value-router"));
+
+    expect(
+      screen.queryByTestId("agent-option-namespace-menu"),
+    ).not.toBeInTheDocument();
+    expect(setOption).not.toHaveBeenCalled();
+  });
+
   it("shows a value in flight with a spinner, and takes no other pick meanwhile", () => {
     renderOptions({
       options: [namespace],

@@ -190,13 +190,35 @@ export function useHomeAgentControls(
       ? lastAnswered.current.preview
       : null;
 
-  if (!launch) return enabled ? LOADING_AGENT_CONTROLS : NO_AGENT_CONTROLS;
-  const isRefusal =
+  const refusal =
+    launch &&
     preview.isError &&
-    isSdkHttpStatusError(preview.error, AGENT_REFUSAL_STATUS);
+    isSdkHttpStatusError(preview.error, AGENT_REFUSAL_STATUS)
+      ? (getSdkHttpErrorDetail(preview.error) ?? preview.error.message)
+      : null;
+  // The agent's sentence for the pick it refused last, until the next pick.
+  const lastRefusal = React.useRef<{
+    launchKey: string;
+    sentence: string;
+  } | null>(null);
+  if (launch && refusal !== null) {
+    lastRefusal.current = { launchKey: launch.launchKey, sentence: refusal };
+  }
+
+  // A refused pick is withdrawn: the picks return to the values of the
+  // preview the agent last answered, which the picker shows, so picking the
+  // refused value again asks the agent again.
+  const launchKey = launch?.launchKey;
+  const answeredValues = answered?.values ?? NO_VALUES;
+  const { setValues } = stored;
+  React.useEffect(() => {
+    if (launchKey && refusal !== null) setValues(launchKey, answeredValues);
+  }, [launchKey, refusal, answeredValues, setValues]);
+
+  if (!launch) return enabled ? LOADING_AGENT_CONTROLS : NO_AGENT_CONTROLS;
   // Any other failure (400, 429, 501, 502, 504, …) shows no controls; the
   // user can still start.
-  const shown = preview.isError && !isRefusal ? null : answered;
+  const shown = preview.isError && refusal === null ? null : answered;
   const options = shown ? pickerOptions(shown.controls) : [];
   return {
     commands: shown?.controls.available_commands ?? [],
@@ -204,12 +226,15 @@ export function useHomeAgentControls(
     pendingValues: preview.isFetching
       ? changedValues(values, options)
       : NO_VALUES,
-    rejection: isRefusal
-      ? (getSdkHttpErrorDetail(preview.error) ?? preview.error.message)
-      : null,
+    rejection:
+      shown && lastRefusal.current?.launchKey === launch.launchKey
+        ? lastRefusal.current.sentence
+        : null,
     isLoading: preview.isLoading,
-    setOption: (configId, value) =>
-      stored.setValue(launch.launchKey, configId, value),
+    setOption: (configId, value) => {
+      lastRefusal.current = null;
+      stored.setValue(launch.launchKey, configId, value);
+    },
     startValues: shown ? acceptedValues(shown) : NO_VALUES,
   };
 }

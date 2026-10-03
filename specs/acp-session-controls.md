@@ -20,7 +20,9 @@ as `acp_config_options`; in a conversation they come from the newest
 ### ASC-002: A conversation starts with values the preview accepted
 - [x] The option values a conversation starts with are values the home screen's
   most recent successful preview accepted: only options it reported, and for a
-  select only values it listed. A value the agent refused is never sent.
+  select only values it listed. A value the agent refused is never sent. A
+  refused pick is withdrawn: the picker shows the agent's value again, and
+  picking the refused value again asks the agent again.
 
 ### ASC-003: The model option belongs to the model picker
 - [x] The option picker never offers the `model` option; the model picker owns

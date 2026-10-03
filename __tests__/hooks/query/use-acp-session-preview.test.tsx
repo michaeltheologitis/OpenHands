@@ -125,6 +125,14 @@ const preview = () =>
   vi.mocked(AgentServerConversationService.previewAcpSession);
 const commandsOf = (controls: { commands: { name: string }[] }) =>
   controls.commands.map(({ name }) => name);
+/** Lets a preview the hook might still start reach the service. */
+const settle = () =>
+  act(
+    () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      }),
+  );
 
 describe("useHomeAgentControls", () => {
   beforeEach(() => {
@@ -194,6 +202,35 @@ describe("useHomeAgentControls", () => {
     expect(preview()).toHaveBeenCalledTimes(3);
   });
 
+  it("asks the agent again when the home screen returns", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function sharedClient({ children }: { children: React.ReactNode }) {
+      return (
+        <QueryClientProvider client={client}>
+          <ActiveBackendProvider>{children}</ActiveBackendProvider>
+        </QueryClientProvider>
+      );
+    }
+    const context: HomeLaunchContext = {
+      workingDir: "/repo",
+      workspaceMode: "local_repo",
+    };
+    const first = renderHook(() => useHomeAgentControls(context), {
+      wrapper: sharedClient,
+    });
+    await waitFor(() =>
+      expect(commandsOf(first.result.current)).toEqual(["summarize"]),
+    );
+    first.unmount();
+    await settle();
+
+    renderHook(() => useHomeAgentControls(context), { wrapper: sharedClient });
+
+    await waitFor(() => expect(preview()).toHaveBeenCalledTimes(2));
+  });
+
   // @spec ASC-003 — The model option belongs to the model picker
   it("offers the agent's select options except the model, and no boolean", async () => {
     const { result } = renderHome();
@@ -221,7 +258,7 @@ describe("useHomeAgentControls", () => {
   });
 
   // @spec ASC-002 — A conversation starts with values the preview accepted
-  it("keeps the last accepted controls and start values when the agent refuses a pick, and says why", async () => {
+  it("returns the picks to the last accepted values when the agent refuses one, without asking again, and says why", async () => {
     const { result } = renderHome();
     await waitFor(() =>
       expect(commandsOf(result.current)).toEqual(["summarize"]),
@@ -234,15 +271,57 @@ describe("useHomeAgentControls", () => {
     act(() => result.current.setOption("profile", "turbo"));
 
     await waitFor(() =>
-      expect(result.current.rejection).toBe("unknown profile 'turbo'"),
+      expect(useHomeAgentOptionsStore.getState()).toMatchObject({
+        launchKey: LAUNCH_KEY,
+        values: { profile: "thorough" },
+      }),
     );
+    await settle();
+    expect(result.current.rejection).toBe("unknown profile 'turbo'");
     expect(commandsOf(result.current)).toEqual(["summarize", "compare"]);
     expect(result.current.options[0].current_value).toBe("thorough");
+    expect(result.current.pendingValues).toEqual({});
     expect(result.current.startValues).toEqual({ profile: "thorough" });
-    expect(useHomeAgentOptionsStore.getState()).toMatchObject({
+    expect(preview()).toHaveBeenCalledTimes(3);
+  });
+
+  // A refusal that lands after the home screen has gone (a start sent while
+  // the pick's preview ran) leaves nothing answered to return to.
+  it("returns refused picks to the agent's defaults when the home screen has no answer yet", async () => {
+    useHomeAgentOptionsStore.setState({
       launchKey: LAUNCH_KEY,
       values: { profile: "turbo" },
     });
+
+    const { result } = renderHome();
+
+    await waitFor(() =>
+      expect(result.current.options[0]?.current_value).toBe("fast"),
+    );
+    expect(useHomeAgentOptionsStore.getState().values).toEqual({});
+    expect(result.current.rejection).toBe("unknown profile 'turbo'");
+  });
+
+  it("asks the agent again when the value it refused is picked again", async () => {
+    const { result } = renderHome();
+    await waitFor(() =>
+      expect(commandsOf(result.current)).toEqual(["summarize"]),
+    );
+    act(() => result.current.setOption("profile", "turbo"));
+    await waitFor(() =>
+      expect(result.current.rejection).toBe("unknown profile 'turbo'"),
+    );
+
+    act(() => result.current.setOption("profile", "turbo"));
+
+    await waitFor(() => expect(preview()).toHaveBeenCalledTimes(3));
+    expect(preview()).toHaveBeenLastCalledWith(
+      expect.objectContaining({ acpConfigOptions: { profile: "turbo" } }),
+    );
+    await waitFor(() =>
+      expect(useHomeAgentOptionsStore.getState().values).toEqual({}),
+    );
+    expect(result.current.rejection).toBe("unknown profile 'turbo'");
   });
 
   it("shows a pick in flight until its preview settles", async () => {

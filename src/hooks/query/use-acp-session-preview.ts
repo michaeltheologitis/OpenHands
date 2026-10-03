@@ -1,3 +1,4 @@
+import React from "react";
 import {
   keepPreviousData,
   useQuery,
@@ -60,7 +61,9 @@ export function resolveAcpLaunchProfile(
 /**
  * What the launch agent would offer, asked with the values the user picked.
  * Each preview starts the agent once, so it runs only when the inputs (all
- * discrete user actions) change, never on focus, and is not retried.
+ * discrete user actions) change to ones the agent has not answered since the
+ * home screen mounted, never on focus, and is not retried. A return to the
+ * home screen asks again.
  */
 export function useAcpSessionPreview(
   launch: AcpLaunchProfile | null,
@@ -69,6 +72,7 @@ export function useAcpSessionPreview(
 ): UseQueryResult<AcpSessionPreview, Error> {
   // The start sends a workspace mode only with a workspace (HomeChatLauncher).
   const workspaceMode = context.workingDir ? context.workspaceMode : undefined;
+  const [mountedAt] = React.useState(Date.now);
   // The launch key names the profile; its kind follows from it.
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
   return useQuery({
@@ -89,7 +93,8 @@ export function useAcpSessionPreview(
       values,
     }),
     enabled: launch !== null,
-    staleTime: 0,
+    staleTime: (query) =>
+      query.state.dataUpdatedAt >= mountedAt ? Infinity : 0,
     refetchOnMount: true,
     refetchOnWindowFocus: false,
     retry: false,

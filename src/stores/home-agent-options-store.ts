@@ -11,6 +11,8 @@ export interface HomeAgentOptionsState {
     configId: string,
     value: string | boolean,
   ) => void;
+  /** Replaces the values picked for a launch agent. */
+  setValues: (launchKey: string, values: ACPConfigOptionValues) => void;
 }
 
 /**
@@ -31,5 +33,6 @@ export const useHomeAgentOptionsStore = create<HomeAgentOptionsState>()(
           [configId]: value,
         },
       })),
+    setValues: (launchKey, values) => set({ launchKey, values }),
   }),
 );
