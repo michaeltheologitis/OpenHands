@@ -14,7 +14,7 @@ import { test, expect } from "@playwright/test";
 import {
   deleteConversation,
   ensureMockLLMAgentProfile,
-  ensureMockLLMProfile,
+  ensureMockLLMProfileViaAPI,
   resetMockLLM,
   routeSessionApiKey,
   seedLocalStorage,
@@ -45,11 +45,12 @@ test.describe("ACP sub-agent sessions, replayed", () => {
     "the scripted ACP agent and its transcripts are not mounted into the Docker image",
   );
 
-  test.beforeAll(() => {
+  test.beforeAll(async ({ request }) => {
     expect(
       SCRIPTED_ACP_AGENT,
       "replaying needs the scripted ACP agent (SCRIPTED_ACP_AGENT)",
     ).not.toBeNull();
+    await ensureMockLLMProfileViaAPI(request);
   });
 
   test.beforeEach(async ({ page }) => {
@@ -72,7 +73,6 @@ test.describe("ACP sub-agent sessions, replayed", () => {
       request,
     }) => {
       test.setTimeout(180_000);
-      await ensureMockLLMProfile(page);
       await configureScriptedAcpAgent(request, {
         flags: ["--transcript", transcript],
         subagents: true,
