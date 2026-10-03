@@ -14,6 +14,7 @@ import {
   SUBAGENT_TOOL_CALLS_I18N_KEY,
 } from "./subagent-labels";
 import { useSubagents } from "./subagent-source";
+import { StopSubagentButton } from "./stop-subagent-button";
 import { SubagentTranscript } from "./subagent-transcript";
 
 export interface SubagentRowProps {
@@ -107,6 +108,7 @@ export const SubagentRow = React.memo(function SubagentRow({
             {cost}
           </span>
         )}
+        <StopSubagentButton sessionId={sessionId} title={title} />
       </div>
       {expanded && <SubagentTranscript sessionId={sessionId} depth={depth} />}
     </li>
