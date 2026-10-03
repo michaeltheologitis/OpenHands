@@ -68,7 +68,11 @@ function StopControl({ sessionId, title }: StopSubagentButtonProps) {
 function WithheldStop() {
   const { t } = useTranslation("openhands");
   return (
-    <StyledTooltip content={t(I18nKey.SUBAGENTS$STOP_WITHHELD)} placement="top">
+    // Beside the button, so it never covers the Stop of the row above.
+    <StyledTooltip
+      content={t(I18nKey.SUBAGENTS$STOP_WITHHELD)}
+      placement="left"
+    >
       <button
         type="button"
         data-testid="subagent-stop"
