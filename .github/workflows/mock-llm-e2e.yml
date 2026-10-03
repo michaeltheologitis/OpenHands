@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      specs:
+        description: "Space-separated spec paths to run (default: empty, every spec)"
+        required: false
+        default: ""
 
 concurrency:
   group: mock-llm-e2e-${{ github.ref }}
@@ -118,6 +123,7 @@ jobs:
         env:
           MOCK_LLM_PYTHON: .mock-llm-venv/bin/python3
           MOCK_LLM_GLOBAL_TIMEOUT_MS: 1200000
+          SPECS: ${{ inputs.specs }}
         run: |
           set +e
           MARKER_DIR=".mock-llm-markers"
@@ -127,7 +133,12 @@ jobs:
 
           # Run Playwright in background so our shell survives if we have
           # to kill it (the webServer teardown can hang indefinitely).
-          npm run test:e2e:mock-llm &
+          if [ -n "$SPECS" ]; then
+            # shellcheck disable=SC2086 # one argument per spec path
+            npm run test:e2e:mock-llm -- $SPECS &
+          else
+            npm run test:e2e:mock-llm &
+          fi
           PW_PID=$!
 
           # Wait for tests to complete. Playwright's globalTimeout is 20 min
