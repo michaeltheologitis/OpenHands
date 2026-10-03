@@ -24,6 +24,7 @@ import { useLatestAcpSessionControls } from "#/hooks/query/use-latest-acp-sessio
 import { useAcpModelContext } from "#/hooks/use-acp-model-context";
 import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
+import { retrieveAxiosErrorMessage } from "#/utils/retrieve-axios-error-message";
 
 export type { HomeLaunchContext };
 
@@ -141,7 +142,9 @@ export function useConversationAgentControls(
         { conversationId, configId, value },
         {
           onError: (error) =>
-            displayErrorToast(getSdkHttpErrorDetail(error) ?? error.message),
+            displayErrorToast(
+              getSdkHttpErrorDetail(error) ?? retrieveAxiosErrorMessage(error),
+            ),
         },
       ),
   };

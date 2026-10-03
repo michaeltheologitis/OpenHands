@@ -18,6 +18,10 @@ import {
 } from "#/hooks/chat/use-agent-controls";
 import { useEventStore } from "#/stores/use-event-store";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
+import {
+  BACKEND_REQUEST_TIMEOUT_MESSAGE,
+  CORS_OR_NETWORK_ERROR_MESSAGE,
+} from "#/utils/user-facing-error";
 
 vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
   ...(await importOriginal<
@@ -72,6 +76,25 @@ const controlsEvent: ACPSessionControlsEvent = {
     },
   ],
 };
+
+// The set route's failures, as the TypeScript client throws them.
+const gatewayTimeoutBody = {
+  detail: "Internal Server Error",
+  exception:
+    "504: ACP server did not answer session/set_config_option for 'profile' within 30s",
+};
+const gatewayTimeout = Object.assign(
+  new Error(
+    `HTTP request failed (504 Gateway Timeout): ${JSON.stringify(gatewayTimeoutBody)}`,
+  ),
+  { name: "HttpError", status: 504, response: gatewayTimeoutBody },
+);
+const clientTimeout = new Error("Request timeout after 60000ms", {
+  cause: new DOMException("The operation timed out.", "TimeoutError"),
+});
+const lostConnection = new Error("Request failed: Failed to fetch", {
+  cause: new TypeError("Failed to fetch"),
+});
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const [client] = React.useState(
@@ -228,26 +251,31 @@ describe("useConversationAgentControls", () => {
     );
   });
 
-  it("never shows a 5xx answer's placeholder detail as the agent's sentence", async () => {
-    const failure = Object.assign(new Error("HTTP request failed (504)"), {
-      name: "HttpError",
-      status: 504,
-      response: {
-        detail: "Internal Server Error",
-        exception: "504: Timed out waiting for the ACP agent",
-      },
-    });
-    vi.spyOn(
-      AgentServerConversationService,
-      "setAcpConfigOption",
-    ).mockRejectedValue(failure);
-    const { result } = renderControls();
-    await waitFor(() => expect(result.current.options).toHaveLength(1));
+  // The model picker in the same composer reports its failures through
+  // upstream's global mutation toast, in these words.
+  it.each([
+    [
+      "a 504, in the client's own words and never the placeholder detail",
+      gatewayTimeout,
+      gatewayTimeout.message,
+    ],
+    ["a client timeout", clientTimeout, BACKEND_REQUEST_TIMEOUT_MESSAGE],
+    ["a lost connection", lostConnection, CORS_OR_NETWORK_ERROR_MESSAGE],
+  ])(
+    "reports a failed pick that is not a refusal as upstream does, for %s",
+    async (_label, failure, toasted) => {
+      vi.spyOn(
+        AgentServerConversationService,
+        "setAcpConfigOption",
+      ).mockRejectedValue(failure);
+      const { result } = renderControls();
+      await waitFor(() => expect(result.current.options).toHaveLength(1));
 
-    act(() => result.current.setOption("profile", "thorough"));
+      act(() => result.current.setOption("profile", "thorough"));
 
-    await waitFor(() =>
-      expect(displayErrorToast).toHaveBeenCalledWith(failure.message),
-    );
-  });
+      await waitFor(() =>
+        expect(displayErrorToast).toHaveBeenCalledWith(toasted),
+      );
+    },
+  );
 });
