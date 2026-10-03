@@ -743,10 +743,22 @@ function spawnService(name, command, args, options = {}) {
       logService(name, `Exited with code ${code}`, c.red);
       emitServiceLog(name, `exited with code ${code}`, "error");
     }
-    processes.delete(name);
   });
 
-  processes.set(name, proc);
+  // A service runs until its process exits. One spawned with
+  // `untilOutputCloses` (the setup command) runs until its output closes: a
+  // child it left in the background can hold that output, in its process
+  // group, after the command itself has exited.
+  const untilOutputCloses = options.untilOutputCloses === true;
+  const service = { proc, untilOutputCloses, ended: false };
+  service.whenEnded = new Promise((done) =>
+    proc.once(untilOutputCloses ? "close" : "exit", () => {
+      service.ended = true;
+      processes.delete(name);
+      done();
+    }),
+  );
+  processes.set(name, service);
   return proc;
 }
 
@@ -1290,7 +1302,9 @@ function setupFailureMessage({
  * }} options  timeoutMs defaults to SETUP_COMMAND_TIMEOUT_MS; on expiry the
  *   command's process group gets SIGTERM, SIGKILL 3 s later if still running,
  *   whether or not the command itself has exited, and the promise rejects once
- *   its output has closed
+ *   its output has closed. A quit stops it the same way, with the other
+ *   services (stopServices); the promise then settles neither way, so main()
+ *   starts nothing after the phase while the launcher exits.
  * @returns {Promise<{ durationMs: number }>}
  * @throws {SetupCommandError} on a non-zero exit, a signal, a spawn error or the timeout
  */
@@ -1308,6 +1322,7 @@ export async function runSetupCommand({
     cwd,
     env,
     color: c.cyan,
+    untilOutputCloses: true,
   });
 
   const outcome = await new Promise((settle) => {
@@ -1325,7 +1340,7 @@ export async function runSetupCommand({
     const finish = (result) => {
       clearTimeout(timeout);
       clearTimeout(forceStop);
-      settle(result);
+      if (!shuttingDown) settle(result);
     };
     proc.once("error", (spawnError) => {
       // Only a process that never started has no pid; any other error (a
@@ -1362,29 +1377,43 @@ export async function runSetupCommand({
 
 let shuttingDown = false;
 
+/** Whether a service from spawnService() has not yet ended. */
+function isServiceRunning({ proc, untilOutputCloses, ended }) {
+  return untilOutputCloses ? !ended : isProcessRunning(proc);
+}
+
+/**
+ * Signal a running service's process tree. One that runs until its output
+ * closes is signalled as a group even when its own process has exited, since
+ * a child it left in the background may hold that output.
+ */
+function signalService({ proc, untilOutputCloses }, signal) {
+  signalProcessTree(proc, signal, { evenIfLeaderExited: untilOutputCloses });
+}
+
 /**
  * Stop every service this launcher is running: SIGTERM to each process tree,
- * SIGKILL to any still running 3 s later. Resolves once all have exited; does
+ * SIGKILL to any still running 3 s later. Resolves once all have ended; does
  * not exit the launcher.
  */
 async function stopServices() {
-  const running = [...processes].filter(([, proc]) => isProcessRunning(proc));
-  const exited = Promise.all(
-    running.map(([, proc]) => new Promise((done) => proc.once("exit", done))),
+  const running = [...processes].filter(([, service]) =>
+    isServiceRunning(service),
   );
-  for (const [name, proc] of running) {
+  const ended = Promise.all(running.map(([, service]) => service.whenEnded));
+  for (const [name, service] of running) {
     logService(name, "Stopping...", c.dim);
-    signalProcessTree(proc, "SIGTERM");
+    signalService(service, "SIGTERM");
   }
   const forceStop = setTimeout(() => {
-    for (const [name, proc] of running) {
-      if (isProcessRunning(proc)) {
+    for (const [name, service] of running) {
+      if (isServiceRunning(service)) {
         logService(name, "Force stopping...", c.dim);
-        signalProcessTree(proc, "SIGKILL");
+        signalService(service, "SIGKILL");
       }
     }
   }, FORCE_STOP_DELAY_MS);
-  await exited;
+  await ended;
   clearTimeout(forceStop);
 }
 

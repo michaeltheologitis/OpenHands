@@ -1031,16 +1031,6 @@ describe("setup command", () => {
         await delay(10);
       }
     };
-    /**
-     * Whether `pid` has exited, counting a zombie that nobody reaped yet. A
-     * killed child can still be exiting when the command's output closes.
-     */
-    const hasExited = (pid: number) => {
-      const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
-        encoding: "utf8",
-      }).stdout.trim();
-      return state === "" || state.startsWith("Z");
-    };
     /** Resolves once `pid`, a child of this process, has been reaped. */
     const reaped = async (pid: number) => {
       while (spawnSync("ps", ["-p", String(pid)]).status === 0) {
@@ -1688,6 +1678,17 @@ function readJsonLines<T>(file: string): T[] {
     .map((line) => JSON.parse(line) as T);
 }
 
+/**
+ * Whether `pid` has exited, counting a zombie that nobody reaped yet. A killed
+ * child can still be exiting when the command's output closes.
+ */
+function hasExited(pid: number) {
+  const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+    encoding: "utf8",
+  }).stdout.trim();
+  return state === "" || state.startsWith("Z");
+}
+
 async function waitUntil(condition: () => boolean, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (!condition() && Date.now() < deadline) {
@@ -2071,6 +2072,74 @@ describe.skipIf(process.platform === "win32")(
         ).toBe(false);
       } finally {
         await launch.stop();
+      }
+    }, 30_000);
+
+    /** The pids a setup command printed on one line, once it has. */
+    const printedPids = (output: string, phase: string) =>
+      output
+        .match(new RegExp(`\\[setup ${phase}\\]\\S* ([\\d ]+)$`, "m"))?.[1]
+        .split(" ")
+        .map(Number);
+
+    it.each([
+      ["before-start", "obeys", ""],
+      ["after-ready", "ignores", 'trap "" TERM; '],
+    ])(
+      "quitting while %s waits on a background child that %s SIGTERM stops the child and ends the launch there",
+      async (phase, _, trap) => {
+        const command = ["sh", "-c", `${trap}sleep 300 & echo $$ $!`];
+        const app = packagedApp({ setup: { command, phases: [phase] } });
+        const launch = await launchPackagedApp(app);
+        let child: number | undefined;
+
+        try {
+          expect(
+            await waitUntil(() => !!printedPids(launch.output(), phase)),
+            launch.output(),
+          ).toBe(true);
+          let shell: number;
+          [shell, child] = printedPids(launch.output(), phase)!;
+          expect(await waitUntil(() => hasExited(shell))).toBe(true);
+          expect(hasExited(child)).toBe(false);
+
+          launch.child.kill("SIGTERM");
+
+          expect(await launch.exited).toBe(0);
+          await expect
+            .poll(() => hasExited(child!), { timeout: 5_000 })
+            .toBe(true);
+          expect(launch.output()).not.toContain("Done in");
+        } finally {
+          await launch.stop();
+          if (child && !hasExited(child)) process.kill(child, "SIGKILL");
+        }
+      },
+      30_000,
+    );
+
+    it("quitting after a phase has finished signals nothing to its process group", async () => {
+      const command = ["sh", "-c", "sleep 300 > /dev/null 2>&1 & echo $!"];
+      const app = packagedApp({
+        setup: { command, phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+      let child: number | undefined;
+
+      try {
+        expect(
+          await waitUntil(() => agentServerStart(app) !== undefined),
+          launch.output(),
+        ).toBe(true);
+        [child] = printedPids(launch.output(), "before-start")!;
+
+        launch.child.kill("SIGTERM");
+
+        expect(await launch.exited).toBe(0);
+        expect(hasExited(child)).toBe(false);
+      } finally {
+        await launch.stop();
+        if (child && !hasExited(child)) process.kill(child, "SIGKILL");
       }
     }, 30_000);
 
