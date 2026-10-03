@@ -123,6 +123,40 @@ host API contains:
   extension's owning backend; a request may take up to 60 seconds
   (`CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS`), enough for an App
   backend to start
+- `appBackend.mountFrame(container, { path, title, onError })`, the App's own
+  backend in a sandboxed frame (below)
+
+### App backend frames
+
+An App with a backend reaches it through the agent-server's App ingress: a
+separate browser origin (`app_backend_ingress_url` in `/server_info`, with
+`canvas_app_backend_bridge_v1`) whose requests are authorized by a per-App
+session cookie that only a holder of the session key can mint. The App's code
+runs in Canvas and holds no key, so the host mints the session and shows the
+backend's own UI in a frame:
+
+- `host.appBackend.mountFrame(container, { path, title, onError })` appends an
+  `<iframe>` filling the container, with `src` the session's
+  `{ingress}/app-backends/{name}/` plus `path` (without its leading `/`; it may
+  carry a query string), the server's `iframe_sandbox` tokens,
+  `referrerpolicy="no-referrer"` and `title` as its accessible name. That
+  element is the frame: it stays in the container, also across session
+  refreshes, until the returned disposer removes it.
+- Inside the frame the UI talks to its backend same-origin, with relative URLs
+  and any method; the cookie is sent automatically. A WebSocket the frame opens
+  is cut when its session expires. The frame has no session key, so anything
+  it needs from the agent-server's own API, the page passes in `path`.
+- The host keeps one session per App and backend: minted by the first frame,
+  refreshed a minute before it expires, and revoked when the App's last frame
+  is disposed (a revoke would cut every frame of the App).
+- When the frame cannot be shown, the container gets a short notice and
+  `onError` is called once with a `reason`: `no-ingress` (the agent-server has
+  no App ingress), `not-ready` (the App's backend is not running),
+  `session-refused` (the agent-server refused the session, or a refresh
+  failed), or `unsupported-backend` (a Cloud backend).
+
+This frame isolates the App's backend UI, not its Canvas code, which stays
+trusted same-realm code (decision 2).
 
 ### Conversation header panels
 
@@ -338,6 +372,10 @@ run `npm run lint`, `npm test`, `npm run build`, and `npm run build:lib`.
 ### CX-004: Declared registrations only
 - [x] A registration the manifest does not declare is refused; on an Agent
   Server without conversation panels the refusal does not fail the App.
+
+### CX-005: App backend sessions
+- [x] An App's backend session is revoked only when that App's last frame
+  closes.
 
 ### CX-006: Stable test ids for header panels
 - [x] These `data-testid`s are a contract for end-to-end tests; renaming one is
