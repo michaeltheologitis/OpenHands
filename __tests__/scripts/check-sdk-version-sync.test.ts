@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Type definitions for the module exports
@@ -8,7 +11,7 @@ type FindClientPinMismatch = (
   pinned: string | null,
   expected: string,
 ) => { package: string; expected: string; actual: string | null } | null;
-type ReadClientPin = () => string | null;
+type ReadClientPin = (root?: string) => string | null;
 
 // Import after mocking - need dynamic import since the script has side effects
 describe("check-sdk-version-sync helpers", () => {
@@ -203,8 +206,63 @@ describe("check-sdk-version-sync helpers", () => {
   });
 
   describe("readClientPin", () => {
+    const tarballUrl =
+      "https://github.com/example/sdk/releases/download/dr-1/openhands-typescript-client-1.50.1.tgz";
+    const roots: string[] = [];
+
+    afterEach(() => {
+      for (const root of roots.splice(0)) {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    function repoPinning(pin: string, lockedVersion?: string): string {
+      const root = mkdtempSync(path.join(tmpdir(), "client-pin-"));
+      roots.push(root);
+      writeFileSync(
+        path.join(root, "package.json"),
+        JSON.stringify({ dependencies: { [CLIENT_PACKAGE_NAME]: pin } }),
+      );
+      const packages = lockedVersion
+        ? {
+            [`node_modules/${CLIENT_PACKAGE_NAME}`]: {
+              version: lockedVersion,
+              resolved: pin,
+            },
+          }
+        : {};
+      writeFileSync(
+        path.join(root, "package-lock.json"),
+        JSON.stringify({ lockfileVersion: 3, packages }),
+      );
+      return root;
+    }
+
     it("reads an exact pin this repo actually ships", () => {
       expect(readClientPin()).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/);
     });
+
+    it("reads a release tarball's URL as the version the lockfile locked for it", () => {
+      const root = repoPinning(tarballUrl, "1.50.1");
+
+      expect(readClientPin(root)).toBe("1.50.1");
+      expect(findClientPinMismatch(readClientPin(root), "1.50.1")).toBeNull();
+    });
+
+    it.each([
+      ["another locked version", "1.49.0", "1.49.0"],
+      ["no locked entry", undefined, null],
+    ])(
+      "still reports a tarball pin with %s as a skew",
+      (_case, lockedVersion, actual) => {
+        const root = repoPinning(tarballUrl, lockedVersion);
+
+        expect(findClientPinMismatch(readClientPin(root), "1.50.1")).toEqual({
+          package: CLIENT_PACKAGE_NAME,
+          expected: "1.50.1",
+          actual,
+        });
+      },
+    );
   });
 });
