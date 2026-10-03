@@ -1,9 +1,15 @@
 {
-  "_comment": "Single source of truth for version pins, ports, paths, and defaults shared across the npm and Docker install paths. Read by scripts/dev-safe.mjs, scripts/dev-with-automation.mjs, docker/entrypoint.sh (via generated defaults.env), and .github/workflows/docker.yml.",
+  "_comment": "Single source of truth for version pins, ports, paths, and defaults shared across the npm and Docker install paths. Read by scripts/dev-safe.mjs, scripts/dev-with-automation.mjs, scripts/launcher-defaults.mjs, docker/entrypoint.sh (via generated defaults.env), and .github/workflows/docker.yml.",
   "versions": {
     "agentServer": "1.50.1",
     "agentCanvas": "1.24.0",
     "automation": "1.16.0"
+  },
+  "sources": {
+    "_comment": "Optional agent-server source for the npm and desktop launchers (scripts/launcher-defaults.mjs; Docker ignores it), so a build can run a fork of the SDK without environment variables. Fallbacks for OH_AGENT_SERVER_GIT_REPO (an https:// or ssh:// URL) and OH_AGENT_SERVER_GIT_REF: environment variables still win, and the ref applies only when the environment names no agent-server source. A full 40-hex commit is installed once and then reused offline; any other ref is refetched on every launch. null means unset: the agent-server comes from PyPI at versions.agentServer. Everything in this file is also compiled into the frontend bundle, so it must never hold a secret.",
+    "agentServerGitRepo": "https://github.com/michaeltheologitis/software-agent-sdk",
+    "_agentServerGitRefComment": "tag dr-1 of michaeltheologitis/software-agent-sdk",
+    "agentServerGitRef": "cef3b24198070efb2c38ab8b1aca2f24836eecbd"
   },
   "compatibility": {
     "minimumAgentServer": "1.47.0"
@@ -26,7 +32,14 @@
     "automationDb": "automation/automations.db",
     "canvasBasePath": "/canvas",
     "_vscodeBasePathComment": "Path prefix the bundled editor is served under, on the same origin as the canvas. Passed to agent-server as OH_VSCODE_BASE_PATH (it launches openvscode-server with --server-base-path and advertises the prefix in /api/vscode/url), and registered as an ingress route to the VSCode port. Keeping one value on both sides is what lets a single-origin deployment reach the editor without publishing a second port. Tradeoff: a path prefix routes but does not isolate, so the editor shares the canvas's browser origin and therefore its localStorage — see docs/SELF_HOSTING.md and OpenHands/OpenHands#16492.",
-    "vscodeBasePath": "/vscode"
+    "vscodeBasePath": "/vscode",
+    "_stateDirComment": "npm and desktop launchers only; Docker uses stateSubdir. The fallback for OH_CANVAS_SAFE_STATE_DIR: an absolute path or one starting with ~/. When set here, the session and secret key files (api-key.txt, secret-key.txt) live in it too. The parent of this directory is the agent-server's persistence root (settings, secrets, profiles, installed Apps, skills, the automation database), so a build that keeps its own state names a directory whose parent is its own, e.g. ~/.example-app/agent-canvas. null means ~/.openhands/agent-canvas.",
+    "stateDir": null
+  },
+  "setup": {
+    "_comment": "Optional command the full-stack npm and desktop launchers (scripts/dev-with-automation.mjs: the desktop app, npm run dev, the agent-canvas bin) run as the user on every launch that starts the agent-server: before-start runs before any service starts; after-ready runs once the agent-server answers /server_info, with AGENT_SERVER_URL and SESSION_API_KEY in its environment, before automation, the frontend and the ingress start. An argv array run without a shell, stdin closed, working directory the state directory, OH_CANVAS_SETUP_PHASE naming the phase; its output goes to the startup log. A non-zero exit, a signal or 15 minutes without exiting stops the launch. null means no setup. phases lists before-start, after-ready or both (the default).",
+    "command": null,
+    "phases": ["before-start", "after-ready"]
   },
   "packages": {
     "agentServer": "openhands-agent-server",

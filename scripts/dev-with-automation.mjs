@@ -35,6 +35,8 @@
  *     openhands-tools and openhands-workspace as editable so source edits are
  *     picked up without manual reinstall.
  *   - OH_AGENT_SERVER_GIT_REF: Git ref for agent-server
+ *   - OH_AGENT_SERVER_GIT_REPO: Git repository for OH_AGENT_SERVER_GIT_REF
+ *     (https:// or ssh:// URL; default: upstream software-agent-sdk)
  * Secrets:
  *   The session API key is automatically seeded into agent-server secrets
  *   as OPENHANDS_AUTOMATION_API_KEY, making it available to agents in conversations.
@@ -59,6 +61,7 @@ import {
   buildAgentServerEnv,
   buildNpmScriptCommand,
   buildRuntimeServicesInfo,
+  DEFAULT_AGENT_SERVER_GIT_REPO,
   formatMissingUvxGuidance,
   validateFrontendDependencies,
   validateLocalAgentServerPath,
@@ -70,6 +73,11 @@ import {
   resolveWindowsCommand,
   signalProcessTree,
 } from "./dev-process-utils.mjs";
+import {
+  applyLauncherDefaults,
+  readSetupConfig,
+  SETUP_PHASES,
+} from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 import {
   applySessionKeyPolicy,
@@ -269,9 +277,19 @@ ENVIRONMENT VARIABLES:
   OH_AUTOMATION_VERSION       Specific PyPI version for automation (default: ${DEFAULT_AUTOMATION_VERSION})
   OH_AUTOMATION_LOCAL_PATH    Absolute path to a local automation checkout (overridden only by --automation-git-ref)
   OH_AGENT_SERVER_LOCAL_PATH  Absolute path to a local software-agent-sdk checkout (highest precedence)
-  OH_AGENT_SERVER_GIT_REF     Git ref for agent-server SDK (overrides default version)
+  OH_AGENT_SERVER_GIT_REF     Git ref for agent-server SDK (overrides default version);
+                              a full 40-hex commit SHA is installed once and reused
+  OH_AGENT_SERVER_GIT_REPO    Git repository for OH_AGENT_SERVER_GIT_REF
+                              (default: ${DEFAULT_AGENT_SERVER_GIT_REPO})
   OH_AGENT_SERVER_VERSION     Specific PyPI version for agent-server
   OH_SECRET_KEY               Secret key for sessions
+
+SETUP:
+  A build's config/defaults.json "setup" may name a command (an argv array)
+  that runs as you on every launch that starts the agent-server: before any
+  service starts (before-start) and once the agent-server answers (after-ready,
+  with AGENT_SERVER_URL and SESSION_API_KEY set). OH_CANVAS_SETUP_PHASE names
+  the phase. A non-zero exit stops the launch.
 
 SECRETS:
   The session API key is automatically seeded into agent-server secrets
@@ -657,6 +675,12 @@ function emitServiceLog(name, line, level) {
   }
 }
 
+/** A launcher line for both the terminal and the service-log listener. */
+function logServiceEvent(name, message, color) {
+  logService(name, message, color);
+  emitServiceLog(name, message, "info");
+}
+
 function registerShutdownHook(hook) {
   return shutdownHooks.add(hook);
 }
@@ -726,11 +750,70 @@ function spawnService(name, command, args, options = {}) {
   return proc;
 }
 
-async function waitForService(name, url, timeoutMs = 30000) {
+// How many of a service's last output lines an early-exit error quotes.
+const EXIT_OUTPUT_TAIL_LINES = 10;
+
+/**
+ * Follow a spawned service until it is gone: its exit (`close`, so every
+ * output line has arrived) or spawn error, and its last output lines.
+ *
+ * @param {import("node:child_process").ChildProcess} proc
+ */
+function watchServiceExit(proc) {
+  const watch = { exit: null, spawnError: null, tail: [] };
+  const remember = (data) => {
+    watch.tail.push(
+      ...data
+        .toString()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+    watch.tail.splice(0, watch.tail.length - EXIT_OUTPUT_TAIL_LINES);
+  };
+  proc.stdout?.on("data", remember);
+  proc.stderr?.on("data", remember);
+  proc.once("error", (error) => {
+    watch.spawnError = error;
+  });
+  proc.once("close", (code, signal) => {
+    watch.exit = { code, signal };
+  });
+  return watch;
+}
+
+function formatServiceExit(name, watch) {
+  const head = watch.spawnError
+    ? `${name} could not be started (${watch.spawnError.message}).`
+    : `${name} exited before startup completed (code=${watch.exit.code ?? "null"}, signal=${watch.exit.signal ?? "null"}).`;
+  if (watch.tail.length === 0) return head;
+  return [
+    `${head} Last output:`,
+    ...watch.tail.map((line) => `  ${line}`),
+  ].join("\n");
+}
+
+/**
+ * Poll `url` until it answers 200 or `timeoutMs` passes.
+ *
+ * @param {string} name
+ * @param {string} url
+ * @param {number} [timeoutMs]
+ * @param {import("node:child_process").ChildProcess} [proc] the service's
+ *   process; when given, its exit before `url` answers fails the wait at once
+ * @returns {Promise<boolean>} true when ready, false on timeout
+ * @throws {Error} naming the exit code and last output lines when `proc`
+ *   exits (or fails to start) before `url` answers
+ */
+async function waitForService(name, url, timeoutMs = 30000, proc = null) {
   const start = Date.now();
   let lastError = null;
+  const watch = proc ? watchServiceExit(proc) : null;
 
   while (Date.now() - start < timeoutMs) {
+    if (watch?.exit) {
+      throw new Error(formatServiceExit(name, watch));
+    }
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
@@ -971,7 +1054,7 @@ function startAgentServer(config) {
     LOG_JSON: "true",
   };
 
-  spawnService(
+  return spawnService(
     "agent-server",
     agentServerCmd.command,
     [
@@ -1092,10 +1175,216 @@ function startAutomationBackend(config) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Setup Command
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A build's config/defaults.json may name a command the launcher runs as the
+// user on every launch that starts the agent-server: `before-start` before any
+// service starts, `after-ready` once the agent-server answers /server_info
+// (with its URL and the session key) and before automation, the frontend and
+// the ingress start. Anything but exit 0 stops the launch.
+
+/** How long one setup phase may run before it is stopped. */
+export const SETUP_COMMAND_TIMEOUT_MS = 15 * 60_000;
+
+// How long a process tree sent SIGTERM gets before SIGKILL.
+const FORCE_STOP_DELAY_MS = 3000;
+
+/**
+ * A setup command that did not exit 0. main() throws it; the desktop app shows
+ * its message without the ports hint (it checks `error.name`, so it needs no
+ * import).
+ */
+export class SetupCommandError extends Error {
+  /**
+   * @param {string} message
+   * @param {{
+   *   phase: "before-start" | "after-ready",
+   *   command: string[],
+   *   reason: "exit" | "signal" | "spawn" | "timeout",
+   *   exitCode: number | null,
+   *   signal: string | null,
+   * }} details
+   */
+  constructor(message, { phase, command, reason, exitCode, signal }) {
+    super(message);
+    this.name = "SetupCommandError";
+    this.phase = phase;
+    this.command = command;
+    this.reason = reason;
+    this.exitCode = exitCode;
+    this.signal = signal;
+  }
+}
+
+/**
+ * The variables the launcher adds to the setup command's environment. Pure.
+ * @param {{ stateDir: string, agentServerPort: number, sessionApiKey: string }} config  main()'s config
+ * @param {"before-start" | "after-ready"} phase
+ * @returns {Record<string, string>}
+ */
+export function buildSetupEnv(config, phase) {
+  const stateDir = resolve(config.stateDir);
+  return {
+    OH_CANVAS_SETUP_PHASE: phase,
+    OH_CANVAS_SAFE_STATE_DIR: stateDir,
+    // What the agent-server is given: the state directory's parent holds its
+    // settings, secrets, profiles and installed Apps.
+    OH_PERSISTENCE_DIR: dirname(stateDir),
+    ...(phase === "after-ready"
+      ? {
+          AGENT_SERVER_URL: getAgentServerBaseUrl(config),
+          SESSION_API_KEY: config.sessionApiKey,
+        }
+      : {}),
+  };
+}
+
+function formatDuration(ms) {
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+function formatTimeout(ms) {
+  if (ms % 60_000 !== 0) return `${ms} ms`;
+  const minutes = ms / 60_000;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function setupFailureMessage({
+  command,
+  phase,
+  reason,
+  exitCode,
+  signal,
+  spawnError,
+  timeoutMs,
+}) {
+  const what = {
+    exit: `failed (exit ${exitCode})`,
+    signal: `was killed by ${signal}`,
+    timeout: `was stopped after ${formatTimeout(timeoutMs)}`,
+    spawn: `could not be started (${spawnError?.message})`,
+  }[reason];
+  const when =
+    phase === "before-start"
+      ? "before the stack started."
+      : "after the agent-server started; the stack was stopped.";
+  const output = reason === "spawn" ? "" : " Its output is in the startup log.";
+  return `Setup command \`${command.join(" ")}\` ${what} ${when}${output}`;
+}
+
+/**
+ * Run one phase of the setup command through spawnService under the name
+ * `setup ${phase}`: stdin closed, every output line to the service log, `env`
+ * added to process.env, cwd as given. Writes "Running <argv>" first and
+ * "Done in <duration>" on success, to the terminal and the service-log
+ * listener, so the desktop splash shows them.
+ * @param {{
+ *   command: string[],
+ *   phase: "before-start" | "after-ready",
+ *   cwd: string,
+ *   env: Record<string, string>,
+ *   timeoutMs?: number,
+ * }} options  timeoutMs defaults to SETUP_COMMAND_TIMEOUT_MS; on expiry the
+ *   process tree gets SIGTERM, SIGKILL 3 s later if still running, and the
+ *   promise rejects once it has exited
+ * @returns {Promise<{ durationMs: number }>}
+ * @throws {SetupCommandError} on a non-zero exit, a signal, a spawn error or the timeout
+ */
+export async function runSetupCommand({
+  command,
+  phase,
+  cwd,
+  env,
+  timeoutMs = SETUP_COMMAND_TIMEOUT_MS,
+}) {
+  const name = `setup ${phase}`;
+  const startedAt = Date.now();
+  logServiceEvent(name, `Running ${command.join(" ")}`, c.cyan);
+  const proc = spawnService(name, command[0], command.slice(1), {
+    cwd,
+    env,
+    color: c.cyan,
+  });
+
+  const outcome = await new Promise((settle) => {
+    let timedOut = false;
+    let forceStop = null;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      signalProcessTree(proc, "SIGTERM");
+      forceStop = setTimeout(
+        () => signalProcessTree(proc, "SIGKILL"),
+        FORCE_STOP_DELAY_MS,
+      );
+    }, timeoutMs);
+    const finish = (result) => {
+      clearTimeout(timeout);
+      clearTimeout(forceStop);
+      settle(result);
+    };
+    proc.once("error", (spawnError) => {
+      // Only a process that never started has no pid; any other error (a
+      // failed kill) still ends in "close".
+      if (proc.pid === undefined) finish({ reason: "spawn", spawnError });
+    });
+    // "close", not "exit": every output line has reached the log by then.
+    proc.once("close", (exitCode, signal) => {
+      const reason = timedOut ? "timeout" : signal ? "signal" : "exit";
+      finish({ reason, exitCode, signal });
+    });
+  });
+
+  const durationMs = Date.now() - startedAt;
+  if (outcome.reason === "exit" && outcome.exitCode === 0) {
+    logServiceEvent(name, `Done in ${formatDuration(durationMs)}`, c.green);
+    return { durationMs };
+  }
+  throw new SetupCommandError(
+    setupFailureMessage({ command, phase, timeoutMs, ...outcome }),
+    {
+      phase,
+      command,
+      reason: outcome.reason,
+      exitCode: outcome.reason === "spawn" ? null : outcome.exitCode,
+      signal: outcome.reason === "spawn" ? null : outcome.signal,
+    },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════════════════
 
 let shuttingDown = false;
+
+/**
+ * Stop every service this launcher is running: SIGTERM to each process tree,
+ * SIGKILL to any still running 3 s later. Resolves once all have exited; does
+ * not exit the launcher.
+ */
+async function stopServices() {
+  const running = [...processes].filter(([, proc]) => isProcessRunning(proc));
+  const exited = Promise.all(
+    running.map(([, proc]) => new Promise((done) => proc.once("exit", done))),
+  );
+  for (const [name, proc] of running) {
+    logService(name, "Stopping...", c.dim);
+    signalProcessTree(proc, "SIGTERM");
+  }
+  const forceStop = setTimeout(() => {
+    for (const [name, proc] of running) {
+      if (isProcessRunning(proc)) {
+        logService(name, "Force stopping...", c.dim);
+        signalProcessTree(proc, "SIGKILL");
+      }
+    }
+  }, FORCE_STOP_DELAY_MS);
+  await exited;
+  clearTimeout(forceStop);
+}
 
 function shutdown() {
   if (shuttingDown) return;
@@ -1105,21 +1394,10 @@ function shutdown() {
   console.log(`${c.yellow}Shutting down...${c.reset}`);
   fileLog("info", "Shutting down...");
 
-  for (const [name, proc] of processes) {
-    logService(name, "Stopping...", c.dim);
-    signalProcessTree(proc, "SIGTERM");
-  }
-
-  setTimeout(() => {
-    for (const [name, proc] of processes) {
-      if (isProcessRunning(proc)) {
-        logService(name, "Force stopping...", c.dim);
-        signalProcessTree(proc, "SIGKILL");
-      }
-    }
+  stopServices().then(() => {
     shutdownHooks.run();
     process.exit(0);
-  }, 3000);
+  });
 }
 
 process.on("SIGINT", shutdown);
@@ -1483,6 +1761,10 @@ async function main(options = {}) {
     // download / install progress to the user. `level` is one of
     // "stdout" | "stderr" | "info" | "warn" | "error".
     onServiceLog,
+    // The setup command ({ command, phases }, validated like
+    // config/defaults.json `setup`). Undefined reads config/defaults.json;
+    // null runs no setup.
+    setup: setupOption,
   } = options;
 
   // Install the listener early so log lines emitted before the first
@@ -1490,6 +1772,26 @@ async function main(options = {}) {
   setServiceLogListener(onServiceLog);
 
   const args = parseArgs();
+
+  // A build's config/defaults.json may name the agent-server's source and the
+  // state directory; they fill only the variables the environment leaves
+  // unset, so everything below reads one set of values from process.env.
+  const filledFromDefaults = applyLauncherDefaults(
+    process.env,
+    SHARED_DEFAULTS,
+  );
+  if (filledFromDefaults.length > 0) {
+    logServiceEvent(
+      "defaults",
+      `From config/defaults.json: ${filledFromDefaults.join(", ")}`,
+      c.dim,
+    );
+  }
+  // Read now, so a malformed setup fails the launch before anything runs.
+  const setup =
+    setupOption === undefined
+      ? readSetupConfig(SHARED_DEFAULTS)
+      : setupOption && readSetupConfig({ setup: setupOption });
 
   // Allow options to override CLI args for public mode
   if (isPublicOverride != null) {
@@ -1579,6 +1881,23 @@ async function main(options = {}) {
     extraPrereqs(config);
   }
 
+  // The setup command runs only on launches that start the agent-server.
+  const setupPhases = config.launchAgentServer ? (setup?.phases ?? []) : [];
+  const runSetupPhase = (phase) => {
+    const env = buildSetupEnv(config, phase);
+    return runSetupCommand({
+      command: setup.command,
+      phase,
+      cwd: env.OH_CANVAS_SAFE_STATE_DIR,
+      env,
+    });
+  };
+
+  // Before any service starts; a failure throws with nothing to stop.
+  if (setupPhases.includes("before-start")) {
+    await runSetupPhase("before-start");
+  }
+
   if (
     config.launchFrontend &&
     useStaticMode &&
@@ -1608,14 +1927,19 @@ async function main(options = {}) {
   // which can take several minutes. Dropping the user into a half-booted UI
   // before that completes triggers axios "Request timeout" popups on the first
   // SPA fetch that hits an unbound port 18000.
+  //
+  // An agent-server process that exits before it answers (uvx failing at
+  // once on a bad ref or no network) fails the launch at once, with its exit
+  // code and last output lines, instead of running out that timeout.
   if (config.launchAgentServer) {
     const agentServerStarter = startAgentServerOverride ?? startAgentServer;
-    agentServerStarter(config);
+    const agentServerProcess = agentServerStarter(config);
 
     agentServerReady = await waitForService(
       "agent-server",
       `${getAgentServerBaseUrl(config)}/server_info`,
       agentServerReadyTimeoutMs,
+      agentServerProcess,
     );
   }
 
@@ -1632,12 +1956,31 @@ async function main(options = {}) {
     );
   }
 
-  // 3. Start automation backend
+  // 3. The setup command's after-ready phase, before automation, the frontend
+  // and the ingress start, so what it registers through the agent-server
+  // exists before the first screen asks for it. Only the agent-server is
+  // running here, so a failure stops it before failing the launch.
+  if (setupPhases.includes("after-ready") && agentServerReady) {
+    try {
+      await runSetupPhase("after-ready");
+    } catch (error) {
+      await stopServices();
+      throw error;
+    }
+  } else if (setupPhases.includes("after-ready")) {
+    logServiceEvent(
+      "setup after-ready",
+      "Skipping setup after-ready: agent-server not ready",
+      c.yellow,
+    );
+  }
+
+  // 4. Start automation backend
   if (config.launchAutomation) {
     startAutomationBackend(config);
   }
 
-  // 4. Start frontend server (Vite dev server OR static server)
+  // 5. Start frontend server (Vite dev server OR static server)
   if (config.launchFrontend) {
     if (useStaticMode) {
       startStaticFrontend(config, staticDir);
@@ -1646,10 +1989,10 @@ async function main(options = {}) {
     }
   }
 
-  // 5. Wait for services to be ready
+  // 6. Wait for services to be ready
   await delay(2000);
 
-  // 6. Start ingress proxy (routes traffic only to running services)
+  // 7. Start ingress proxy (routes traffic only to running services)
   startIngress(config);
 
   // Wait for ingress to start
@@ -1755,6 +2098,7 @@ export {
   spawnService,
   commandExists,
   validateLocalAutomationPath,
+  SETUP_PHASES,
   logService,
   logStep,
   logSuccess,

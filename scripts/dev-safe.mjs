@@ -26,6 +26,10 @@ import {
 // Docker entrypoint can run it as a CLI. Re-exported below for back-compat
 // (dev-with-automation.mjs and tests still import it from here).
 import { buildRuntimeServicesInfo } from "./runtime-services-info.mjs";
+import {
+  applyLauncherDefaults,
+  validateGitRepoUrl,
+} from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 
 // ── Centralized config (single source of truth for versions, ports, etc.) ───
@@ -46,7 +50,12 @@ export const VSCODE_BASE_PATH = SHARED_DEFAULTS.paths.vscodeBasePath;
 const DEFAULT_VITE_PORT = 3001;
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_AGENT_SERVER_PACKAGE = SHARED_DEFAULTS.packages.agentServer;
-const AGENT_SERVER_GIT_REPO = "https://github.com/OpenHands/software-agent-sdk";
+/** Upstream's repository, used when OH_AGENT_SERVER_GIT_REPO is unset. */
+export const DEFAULT_AGENT_SERVER_GIT_REPO =
+  "https://github.com/OpenHands/software-agent-sdk";
+// A ref uv can reuse from its cache: a full commit pins the code, so it is
+// installed once and later launches need no network.
+const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 const LOCAL_AGENT_SERVER_SUBDIRS = [
   "openhands-agent-server",
   "openhands-sdk",
@@ -416,7 +425,9 @@ export const AGENT_SERVER_IMPORT_MODULES = "canvas_ui_tool";
  *   packages (openhands-sdk, openhands-tools, openhands-workspace) so source
  *   edits are picked up without a manual reinstall. The agent-server itself
  *   is rebuilt from local source on each invocation (--reinstall).
- * - OH_AGENT_SERVER_GIT_REF: Git commit SHA or branch name
+ * - OH_AGENT_SERVER_GIT_REF: Git commit SHA or branch name, installed from
+ *   OH_AGENT_SERVER_GIT_REPO (an https:// or ssh:// URL; default
+ *   DEFAULT_AGENT_SERVER_GIT_REPO). OH_AGENT_SERVER_GIT_REPO alone is ignored.
  * - OH_AGENT_SERVER_VERSION: Specific PyPI version (e.g., "1.50.1")
  *
  * If none are set, defaults to the released version specified by
@@ -461,13 +472,29 @@ export function buildAgentServerCommand(env = process.env) {
     // openhands-agent-server/, openhands-sdk/, openhands-tools/, openhands-workspace/
     // All four must come from the same ref so inter-package APIs stay in sync.
     //
-    // --reinstall is required because the git branch may carry the same version
-    // string as the current PyPI release (e.g. both "1.26.0"). Without it, uv
-    // silently reuses the cached PyPI wheels and the git ref is never actually
-    // used, even though it was explicitly requested.
-    const baseGitUrl = `git+${AGENT_SERVER_GIT_REPO}@${gitRef}`;
+    // --reinstall is required for a branch, a tag or an abbreviated SHA because
+    // the ref may carry the same version string as the current PyPI release
+    // (e.g. both "1.26.0"). Without it, uv silently reuses the cached PyPI
+    // wheels and the git ref is never actually used, even though it was
+    // explicitly requested. uv has to fetch to resolve such a name anyway, so
+    // those launches need the network either way.
+    //
+    // A full 40-hex commit SHA is installed without it: the URL pins the code,
+    // and uv runs its cached build of that commit rather than a PyPI wheel of
+    // the same version (measured with uv 0.8.17). --reinstall implies
+    // --refresh, so it would refetch and rebuild on every launch; without it,
+    // a relaunch of the same commit starts from uv's cache, offline included.
+    const repo = env.OH_AGENT_SERVER_GIT_REPO
+      ? validateGitRepoUrl(
+          env.OH_AGENT_SERVER_GIT_REPO,
+          "OH_AGENT_SERVER_GIT_REPO",
+        )
+      : DEFAULT_AGENT_SERVER_GIT_REPO;
+    const baseGitUrl = `git+${repo}@${gitRef}`;
+    if (!FULL_COMMIT_SHA.test(gitRef)) {
+      uvxArgs.push("--reinstall");
+    }
     uvxArgs.push(
-      "--reinstall",
       "--from",
       `${baseGitUrl}#subdirectory=openhands-agent-server`,
       "--with",
@@ -480,7 +507,10 @@ export function buildAgentServerCommand(env = process.env) {
       AGENT_SERVER_POSTHOG_CONSTRAINT,
       "agent-server",
     );
-    source = `git (${gitRef})`;
+    source =
+      repo === DEFAULT_AGENT_SERVER_GIT_REPO
+        ? `git (${gitRef})`
+        : `git (${gitRepoLabel(repo)}@${gitRef})`;
   } else if (version) {
     // Use specific PyPI version: uvx --from openhands-agent-server==version agent-server
     // The package name differs from the executable name, so we need --from syntax
@@ -525,6 +555,11 @@ export function buildAgentServerCommand(env = process.env) {
     args: uvxArgs,
     source,
   };
+}
+
+/** A repository URL as the source line shows it: `owner/repo` on GitHub. */
+function gitRepoLabel(repo) {
+  return repo.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
 }
 
 function parsePort(value, fallback) {
@@ -842,6 +877,13 @@ export function buildAgentServerEnv(config, options = {}) {
     // a follow-up change to the automation preset reads
     // OH_SESSION_API_KEYS_0 directly (which is already in env).
     AGENT_SERVER_URL: config.backendBaseUrl,
+    // Canvas App backends need a browser origin of their own: the
+    // agent-server's App-backend bridge answers 503 until one is configured,
+    // and it must differ from the origin Canvas is served on. The
+    // agent-server's direct loopback address is one, since Canvas is served
+    // on another port (and as localhost, another site). An explicit value wins.
+    OH_APP_BACKEND_PUBLIC_URL:
+      env.OH_APP_BACKEND_PUBLIC_URL || `http://127.0.0.1:${config.backendPort}`,
     // Let the agent-server resolve canvas_ui_tool when old persisted metadata
     // requests that compatibility module during startup.
     OH_EXTRA_PYTHON_PATH: config.canvasToolsDir,
@@ -953,6 +995,7 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function main() {
+  applyLauncherDefaults();
   console.log("Starting isolated agent-server + frontend dev stack...");
   fileLog("info", "Starting isolated agent-server + frontend dev stack...");
   validateFrontendDependencies();
