@@ -13,6 +13,10 @@ export default [
       "conversations/:conversationId/panel",
       "routes/conversation-panel.tsx",
     ),
+    route(
+      "conversations/:conversationId/panel/:extensionName/:panelId",
+      "routes/conversation-app-panel.tsx",
+    ),
     route("conversations/:conversationId", "routes/conversation.tsx"),
     route("launch", "routes/launch.tsx"),
     route("customize", "routes/extensions-hub.tsx"),
