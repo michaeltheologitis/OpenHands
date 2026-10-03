@@ -16,6 +16,7 @@ import {
   getActionSummaryTitle,
   type EventTitleDescriptor,
 } from "#/components/conversation-events/chat/event-content-helpers/get-action-event-title";
+import { toolCallKey } from "#/utils/subagents/subagent-index";
 import { MonoComponent } from "./mono-component";
 import { PathComponent } from "./path-component";
 
@@ -72,6 +73,8 @@ export const deriveLiveActivity = (
 ): EventTitleDescriptor => {
   const resolvedActionIds = new Set<string>();
   const resolvedToolCallIds = new Set<string>();
+  // ACP ids are unique only within a session, so ACP calls resolve by call key.
+  const resolvedAcpCallKeys = new Set<string>();
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -91,13 +94,14 @@ export const deriveLiveActivity = (
     }
 
     if (isACPToolCallEvent(event)) {
+      const callKey = toolCallKey(event.acp_session_id, event.tool_call_id);
       const isInProgress =
         event.status === "pending" || event.status === "in_progress";
       if (!isInProgress) {
-        resolvedToolCallIds.add(event.tool_call_id);
+        resolvedAcpCallKeys.add(callKey);
         continue;
       }
-      if (resolvedToolCallIds.has(event.tool_call_id)) {
+      if (resolvedAcpCallKeys.has(callKey)) {
         continue;
       }
 

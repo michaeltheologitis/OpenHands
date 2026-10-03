@@ -5,6 +5,7 @@ import {
   isStreamingDeltaEvent,
 } from "#/types/agent-server/type-guards";
 import { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
+import { toolCallKey } from "#/utils/subagents/subagent-index";
 import type {
   DeltaFrame,
   ItemStartedFrame,
@@ -289,10 +290,11 @@ export const handleEventForUI = (
   }
 
   if (isACPToolCallEvent(event)) {
+    const callKey = toolCallKey(event.acp_session_id, event.tool_call_id);
     const existingIndex = newUiEvents.findIndex(
       (uiEvent) =>
         isACPToolCallEvent(uiEvent) &&
-        uiEvent.tool_call_id === event.tool_call_id,
+        toolCallKey(uiEvent.acp_session_id, uiEvent.tool_call_id) === callKey,
     );
     if (existingIndex !== -1) {
       newUiEvents[existingIndex] = event;
