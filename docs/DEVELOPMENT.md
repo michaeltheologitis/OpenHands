@@ -52,6 +52,8 @@ it instead.
 | `PORT`                    | Ingress port                   | `8000`  |
 | `OH_AUTOMATION_GIT_REF`   | Git ref for automation backend (overrides the pinned default version) | *(unset)* |
 | `OH_AGENT_SERVER_GIT_REF` | Git ref for agent-server (overrides the pinned default version) | *(unset)* |
+| `OH_AGENT_SERVER_GIT_REPO` | Git repository `OH_AGENT_SERVER_GIT_REF` installs from (`https://` or `ssh://` URL) | `https://github.com/OpenHands/software-agent-sdk` |
+| `OH_APP_BACKEND_PUBLIC_URL` | Origin the agent-server serves Canvas App backends on | `http://127.0.0.1:<agent-server port>` |
 
 ### Alternative: Minimal Mode (without Automation)
 
@@ -76,9 +78,17 @@ OH_AGENT_SERVER_LOCAL_PATH=/abs/path/to/software-agent-sdk npm run dev
 OH_AGENT_SERVER_GIT_REF=main npm run dev
 OH_AGENT_SERVER_GIT_REF=abc1234 npm run dev
 
+# Use a branch or commit of another repository, such as a fork
+OH_AGENT_SERVER_GIT_REPO=https://github.com/<owner>/software-agent-sdk \
+  OH_AGENT_SERVER_GIT_REF=<full commit SHA> npm run dev
+
 # Use a specific PyPI version
 OH_AGENT_SERVER_VERSION=1.18.0 npm run dev
 ```
+
+All four SDK packages are installed from the same ref. `OH_AGENT_SERVER_GIT_REPO` names the repository for `OH_AGENT_SERVER_GIT_REF`, like `OH_AUTOMATION_REPO` does for automation: an `https://` or `ssh://` URL (no `git+` prefix), ignored without a ref. The startup log names a non-default repository, for example `Using git (<owner>/software-agent-sdk@<ref>)`.
+
+A full 40-character commit SHA is installed once and reused: the launcher passes no `--reinstall`, so later launches of the same commit start from uv's cache, offline included. A branch, a tag or an abbreviated SHA is refetched and rebuilt (`uvx --reinstall`) on every launch, so those launches need the network.
 
 `OH_AGENT_SERVER_LOCAL_PATH` must be an absolute path to a `software-agent-sdk` checkout containing the `openhands-agent-server`, `openhands-sdk`, `openhands-tools`, and `openhands-workspace` workspace packages. The agent-server itself is rebuilt from local source on each start (`uvx --reinstall`); the other workspace packages are installed editable, so their source changes take effect without a rebuild.
 
@@ -88,6 +98,64 @@ OH_AGENT_SERVER_VERSION=1.18.0 npm run dev
 - `OH_CANVAS_SAFE_VSCODE_PORT` — VS Code sidecar port (default `backend port + 1`)
 - `OH_CANVAS_SAFE_STATE_DIR` — base directory for isolated server state
 - `VITE_WORKING_DIR` — repo root used for new conversations (defaults to the current checkout)
+- `OH_APP_BACKEND_PUBLIC_URL` — origin the agent-server serves Canvas App backends on. Its App-backend bridge answers 503 until one is set, and it must differ from the origin Canvas is served on, so the launchers default it to the agent-server's own address, `http://127.0.0.1:<agent-server port>` (Canvas is served on another port, as `localhost`). An explicit value wins.
+
+### Building from a fork: `config/defaults.json`
+
+A packaged desktop app started from Finder or a desktop launcher reads no shell environment. A build that runs its own SDK fork, keeps its own state, or installs something on first launch says so in `config/defaults.json` instead. Upstream's file carries these keys as `null`.
+
+```json
+{
+  "sources": {
+    "agentServerGitRepo": "https://github.com/<owner>/software-agent-sdk",
+    "agentServerGitRef": "<full commit SHA>"
+  },
+  "paths": { "stateDir": "~/.example-app/agent-canvas" },
+  "setup": {
+    "command": ["uvx", "--from", "git+https://github.com/<owner>/<tool>@<commit>", "example-app", "setup"],
+    "phases": ["before-start", "after-ready"]
+  }
+}
+```
+
+The `sources` and `paths` keys are fallbacks for environment variables of the same meaning. Each launcher fills a variable only when it is unset, so environment variables still win, one by one:
+
+| Key                          | Fills                      | Only when                                                                                                                  |
+| ---------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `sources.agentServerGitRepo` | `OH_AGENT_SERVER_GIT_REPO` | the variable is unset                                                                                                      |
+| `sources.agentServerGitRef`  | `OH_AGENT_SERVER_GIT_REF`  | the environment names no agent-server source (`OH_AGENT_SERVER_LOCAL_PATH`, `OH_AGENT_SERVER_GIT_REF`, `OH_AGENT_SERVER_VERSION`) |
+| `paths.stateDir`             | `OH_CANVAS_SAFE_STATE_DIR` | the variable is unset; an absolute path or one starting with `~/`                                                           |
+| `paths.stateDir`             | `OH_SECRET_KEY_PATH`, `OH_SESSION_API_KEY_PATH` (`secret-key.txt` and `api-key.txt` inside it) | the state directory came from this file, and each variable is unset |
+
+Pin the ref to a full commit SHA so relaunches need no network. Every value is checked on every launch, even when the environment wins, so a broken file fails with the key's name. The full-stack launchers log which variables came from the file (`[defaults] From config/defaults.json: …`). Everything in `defaults.json` is also compiled into the frontend bundle, so it must never hold a secret.
+
+**The state directory's parent is the persistence root.** The agent-server is given `OH_PERSISTENCE_DIR`, the parent of the state directory, so with `paths.stateDir` set to `<P>/<name>`:
+
+| Under                           | What                                                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<P>/<name>/`                   | conversations, workspaces, bash events, tmux sockets, automation file storage, `secret-key.txt`, `api-key.txt`                                        |
+| `<P>/`                          | the agent-server's and SDK's state: settings, secrets, workspaces, agent and LLM profiles, installed Canvas Apps and their backends, skills, plugins, hooks |
+| `<P>/automation/automations.db` | the automation backend's database                                                                                                                     |
+
+A build that keeps its own state names a directory whose parent is its own, such as `~/.example-app/agent-canvas`. One under `~/.openhands` shares everything except conversations with a stock Agent Canvas on the same machine.
+
+**The setup command.** `setup.command` is an argv array; `setup.phases` lists `before-start`, `after-ready`, or both (the default). The full-stack launchers (the desktop app, `npm run dev`, the `agent-canvas` bin) run it on every launch that starts the agent-server; `dev:minimal`, `dev:static` and `dev:extra-backend` do not.
+
+- `before-start` runs after the port check, before any service starts. `after-ready` runs once the agent-server answers `/server_info`, before automation, the frontend and the ingress start.
+- It runs without a shell, as the user, with `argv[0]` looked up on the launcher's `PATH` (in the packaged app: the bundled uv and Node first, then the `PATH` the OS gave the app). Its stdin is closed and its working directory is the state directory.
+- Its output goes to the startup log under `setup before-start` / `setup after-ready`, and to the desktop splash, so it must not print secrets.
+- Its environment is the launcher's own, plus:
+
+  | Variable                   | `before-start`                 | `after-ready`                                                        |
+  | -------------------------- | ------------------------------ | -------------------------------------------------------------------- |
+  | `OH_CANVAS_SETUP_PHASE`    | `before-start`                 | `after-ready`                                                        |
+  | `OH_CANVAS_SAFE_STATE_DIR` | the state directory, absolute  | the same                                                             |
+  | `OH_PERSISTENCE_DIR`       | its parent, the persistence root | the same                                                           |
+  | `AGENT_SERVER_URL`         | not set                        | `http://127.0.0.1:<agent-server port>` (direct, not through the ingress) |
+  | `SESSION_API_KEY`          | not set                        | the session key; send it as `X-Session-API-Key`                      |
+
+- Exit 0 continues the launch. A non-zero exit, a signal, a failure to start, or 15 minutes without exiting stops it: in `after-ready` the launcher first stops the agent-server, then the CLI prints the error and exits 1, and the desktop app shows its startup-failure state.
+- It runs on every launch, so it should be fast, and work offline, when it has nothing to do.
 
 ## Alternative development workflows
 
