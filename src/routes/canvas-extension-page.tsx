@@ -3,7 +3,13 @@ import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "#/components/shared/loading-spinner";
 import { useCanvasExtensionsRuntime } from "#/components/features/canvas-extensions/canvas-extensions-runtime";
+import { useCanvasExtensionMount } from "#/components/features/canvas-extensions/use-canvas-extension-mount";
 import { I18nKey } from "#/i18n/declaration";
+import type { CanvasExtensionPageSurface } from "#/types/canvas-extension";
+
+const CANVAS_EXTENSION_PAGE_SURFACE: CanvasExtensionPageSurface = {
+  kind: "page",
+};
 
 export default function CanvasExtensionPage() {
   const { t } = useTranslation("openhands");
@@ -13,7 +19,6 @@ export default function CanvasExtensionPage() {
   const routePath = params["*"] ?? "";
   const { pages, activating, errors } = useCanvasExtensionsRuntime();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [mountError, setMountError] = React.useState<string | null>(null);
 
   const page = React.useMemo(
     () =>
@@ -31,48 +36,21 @@ export default function CanvasExtensionPage() {
     [extensionName, pages, routePath],
   );
 
-  React.useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !page) return undefined;
-    let disposed = false;
-    let disposeMount: (() => void) | undefined;
-    setMountError(null);
-    container.replaceChildren();
-
-    const remainder = routePath
-      .slice(page.contribution.path.length)
-      .replace(/^\/+/, "");
-    Promise.resolve()
-      .then(() =>
-        page.mount({
-          container,
-          path: remainder,
+  const { error: mountError } = useCanvasExtensionMount(
+    containerRef,
+    page?.mount ?? null,
+    page
+      ? {
+          path: routePath
+            .slice(page.contribution.path.length)
+            .replace(/^\/+/, ""),
           navigate: (path) => navigate(path),
-        }),
-      )
-      .then((dispose) => {
-        if (typeof dispose !== "function") return;
-        if (disposed) dispose();
-        else disposeMount = dispose;
-      })
-      .catch((error: unknown) => {
-        if (!disposed) {
-          setMountError(
-            error instanceof Error ? error.message : "Extension page failed.",
-          );
+          conversationId: null,
+          surface: CANVAS_EXTENSION_PAGE_SURFACE,
         }
-      });
-
-    return () => {
-      disposed = true;
-      try {
-        disposeMount?.();
-      } catch (error) {
-        console.error("Canvas Extension page cleanup failed", error);
-      }
-      container.replaceChildren();
-    };
-  }, [navigate, page, routePath]);
+      : null,
+    routePath,
+  );
 
   if (activating && !page) {
     return (

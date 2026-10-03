@@ -75,6 +75,22 @@ export const CANVAS_EXTENSIONS_QUERY_KEYS = {
       orgId,
       connectionRevision,
     ] as const,
+  panelIcon: (
+    backendId: string,
+    orgId: string | null,
+    extensionName: string,
+    resolvedRef: string | null,
+    panelId: string,
+  ) =>
+    [
+      "canvas-extensions",
+      "panel-icon",
+      backendId,
+      orgId,
+      extensionName,
+      resolvedRef,
+      panelId,
+    ] as const,
 } as const;
 
 export const SETUP_QUERY_KEYS = {

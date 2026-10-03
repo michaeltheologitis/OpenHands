@@ -11,7 +11,8 @@ const tabLabelTransition = {
 
 type ConversationTabNavProps = {
   tabValue: string;
-  icon: ComponentType<{ className: string }>;
+  /** Without an icon, the label is always shown. */
+  icon?: ComponentType<{ className: string }>;
   onClick(): void;
   isActive?: boolean;
   label?: string;
@@ -20,6 +21,8 @@ type ConversationTabNavProps = {
   measureOnly?: boolean;
   /** Disable layout-driven shifts while the drawer width is being dragged. */
   suppressLayoutAnimation?: boolean;
+  /** Overrides the default `conversation-tab-<tabValue>` test id. */
+  testId?: string;
 };
 
 export function ConversationTabNav({
@@ -31,6 +34,7 @@ export function ConversationTabNav({
   className,
   measureOnly,
   suppressLayoutAnimation = false,
+  testId,
 }: ConversationTabNavProps) {
   const reduceMotion = useReducedMotion();
   const disableAnimation =
@@ -49,14 +53,18 @@ export function ConversationTabNav({
     className,
   );
 
-  const iconElement = <Icon className={cn("h-4 w-4 shrink-0 text-inherit")} />;
+  const iconElement = Icon ? (
+    <Icon className={cn("h-4 w-4 shrink-0 text-inherit")} />
+  ) : null;
 
   const labelElement =
-    label && isActive ? (
+    label && (isActive || !Icon) ? (
       <span className="whitespace-nowrap text-sm font-normal">{label}</span>
     ) : null;
 
-  const animatedLabelElement = label ? (
+  const animatedLabelElement = !Icon ? (
+    labelElement
+  ) : label ? (
     <motion.span
       initial={false}
       animate={{
@@ -79,7 +87,7 @@ export function ConversationTabNav({
         onClick={onClick}
         {...(measureOnly
           ? {}
-          : { "data-testid": `conversation-tab-${tabValue}` as const })}
+          : { "data-testid": testId ?? `conversation-tab-${tabValue}` })}
         data-tab-measure={measureOnly ? "true" : undefined}
         className={cn(buttonClassName, "gap-2")}
       >
@@ -96,7 +104,7 @@ export function ConversationTabNav({
       onClick={onClick}
       {...(measureOnly
         ? {}
-        : { "data-testid": `conversation-tab-${tabValue}` as const })}
+        : { "data-testid": testId ?? `conversation-tab-${tabValue}` })}
       data-tab-measure={measureOnly ? "true" : undefined}
       className={buttonClassName}
       transition={

@@ -1,6 +1,7 @@
 import { AgentServerClient } from "@openhands/typescript-client/clients";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CanvasExtensionsService, {
+  CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS,
   CanvasExtensionsUnsupportedError,
 } from "#/api/canvas-extensions-service";
 import {
@@ -204,5 +205,48 @@ describe("CanvasExtensionsService", () => {
       }),
     ).rejects.toThrow("root-relative path");
     expect(AgentServerClient).not.toHaveBeenCalled();
+  });
+
+  it("gives an App's agent-server requests a minute, more than an App backend start takes", async () => {
+    request.mockResolvedValue({ status: "running" });
+
+    await CanvasExtensionsService.requestAgentServer(
+      {
+        method: "POST",
+        path: "/api/canvas-extensions/installed/demo/backend/start",
+      },
+      localBackend,
+    );
+
+    expect(CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS).toBe(60_000);
+    expect(AgentServerClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS,
+      }),
+    );
+  });
+
+  it("fetches a panel icon as an authenticated blob from the captured backend", async () => {
+    const icon = new Blob(["<svg/>"], { type: "image/svg+xml" });
+    get.mockResolvedValue(icon);
+
+    await expect(
+      CanvasExtensionsService.fetchPanelIcon(
+        "demo/x",
+        "insights",
+        localBackend,
+      ),
+    ).resolves.toBe(icon);
+
+    expect(AgentServerClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: localBackend.host,
+        apiKey: localBackend.apiKey,
+      }),
+    );
+    expect(get).toHaveBeenCalledWith(
+      "/api/canvas-extensions/installed/demo%2Fx/panels/insights/icon",
+      { responseType: "blob" },
+    );
   });
 });

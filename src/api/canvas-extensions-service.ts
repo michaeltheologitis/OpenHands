@@ -13,6 +13,11 @@ import type {
 } from "#/types/canvas-extension";
 
 const CANVAS_EXTENSIONS_BASE_PATH = "/api/canvas-extensions";
+/**
+ * How long a request to an App's owning agent-server may take, including
+ * `host.agentServer.request`; an App backend start can take 30 s.
+ */
+export const CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS = 60_000;
 const REMOTE_EXTENSION_SOURCE_PATTERN =
   /^(?:github:|https?:\/\/|git:\/\/|file:\/\/|[\w.-]+@[\w.-]+:)/i;
 
@@ -74,7 +79,7 @@ function getClientForBackend(backend: Backend): AgentServerClient {
   return new AgentServerClient({
     host: backend.host,
     ...(backend.apiKey ? { apiKey: backend.apiKey } : {}),
-    timeout: 60000,
+    timeout: CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -167,6 +172,19 @@ class CanvasExtensionsService {
       client.get<string>(`${installedExtensionPath(name)}/bundle`, {
         responseType: "text",
       }),
+    );
+  }
+
+  /** GET …/installed/{name}/panels/{panelId}/icon with the session key. */
+  static async fetchPanelIcon(
+    name: string,
+    panelId: string,
+    backend?: Backend,
+  ): Promise<Blob> {
+    const client = backend ? getClientForBackend(backend) : getClient();
+    return client.get<Blob>(
+      `${installedExtensionPath(name)}/panels/${encodeURIComponent(panelId)}/icon`,
+      { responseType: "blob" },
     );
   }
 

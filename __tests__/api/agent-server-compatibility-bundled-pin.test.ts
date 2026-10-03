@@ -27,6 +27,7 @@ import {
   isAgentServerUnknownVersionError,
   isAgentServerUnsupportedVersionError,
   loadAgentServerInfo,
+  localAgentServerHasCapability,
   MINIMUM_COMPATIBLE_AGENT_SERVER_VERSION,
 } from "#/api/agent-server-compatibility";
 
@@ -436,5 +437,56 @@ describe("cached display versions", () => {
     setActiveSelection({ backendId: cloudBackend.id });
     expect(getCachedAgentServerVersion(localBackend.host)).toBeNull();
     expect(getCachedAgentServerSdkVersion(localBackend.host)).toBeNull();
+  });
+});
+
+describe("localAgentServerHasCapability", () => {
+  const capability = "canvas_conversation_panels_v1";
+
+  async function loadLocalServerInfo(capabilities?: string[]) {
+    setRegisteredBackends([localBackend, cloudBackend]);
+    setActiveSelection({ backendId: localBackend.id });
+    getServerInfoMock.mockResolvedValue({
+      version: MINIMUM_COMPATIBLE_AGENT_SERVER_VERSION,
+      ...(capabilities ? { capabilities } : {}),
+    });
+    await loadAgentServerInfo();
+  }
+
+  it("is true when the active local agent-server advertises the capability", async () => {
+    await loadLocalServerInfo([capability]);
+
+    expect(localAgentServerHasCapability(capability)).toBe(true);
+  });
+
+  it.each([
+    ["lists other capabilities", ["acp_session_controls_v1"]],
+    ["lists no capabilities", undefined],
+  ])("is false when the agent-server %s", async (_label, capabilities) => {
+    await loadLocalServerInfo(capabilities);
+
+    expect(localAgentServerHasCapability(capability)).toBe(false);
+  });
+
+  it("is false on a Cloud backend even with a cached local server_info", async () => {
+    await loadLocalServerInfo([capability]);
+
+    setActiveSelection({ backendId: cloudBackend.id });
+
+    expect(localAgentServerHasCapability(capability)).toBe(false);
+  });
+
+  it("is false when the cached server_info belongs to another local backend", async () => {
+    await loadLocalServerInfo([capability]);
+    const otherLocal = {
+      ...localBackend,
+      id: "other",
+      host: "http://127.0.0.1:9100",
+    };
+
+    setRegisteredBackends([localBackend, otherLocal]);
+    setActiveSelection({ backendId: otherLocal.id });
+
+    expect(localAgentServerHasCapability(capability)).toBe(false);
   });
 });
