@@ -10,6 +10,7 @@ import {
   isHookExecutionEvent,
   isACPToolCallEvent,
   isStreamingDeltaEvent,
+  isSubagentToolCallEvent,
 } from "#/types/agent-server/type-guards";
 
 // Prefixes of the SDK goal-loop re-prompts (FOLLOWUP_PROMPT / RESUME_PROMPT in
@@ -136,8 +137,11 @@ export const shouldRenderEvent = (event: OpenHandsEvent) => {
   // gate existed because the source fanned out one cumulative-output frame per
   // ``ToolCallProgress``, which flashed half-formed cards mid-stream; that
   // fan-out is gone, so the running card is now a single clean event.
+  // A call made inside an ACP sub-agent session renders in that sub-agent's
+  // transcript, under the call that spawned it, not in the root's flow.
+  // @spec SUB-004 — The root's flow shows only the root session's work
   if (isACPToolCallEvent(event)) {
-    return true;
+    return !isSubagentToolCallEvent(event);
   }
 
   if (isStreamingDeltaEvent(event)) {

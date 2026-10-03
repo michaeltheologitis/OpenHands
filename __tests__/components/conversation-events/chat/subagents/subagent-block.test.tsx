@@ -1,0 +1,216 @@
+import { act, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "test-utils";
+import { AcpToolCallCell } from "#/components/conversation-events/chat/subagents/acp-tool-call-cell";
+import { SubagentHistoryContext } from "#/components/conversation-events/chat/subagents/subagent-source";
+import { useEventStore } from "#/stores/use-event-store";
+import type { OpenHandsEvent } from "#/types/agent-server/core";
+import type { ACPToolCallEvent } from "#/types/agent-server/core/events/acp-tool-call-event";
+import {
+  call,
+  child,
+  message,
+  reconnect,
+  ROOT_ACP_SESSION_ID as ROOT_ID,
+  text,
+} from "../../../../helpers/subagent-events";
+
+vi.mock("react-i18next", async (importOriginal) => {
+  const { englishT } = await import("../../../../helpers/english-translations");
+  return {
+    ...(await importOriginal<typeof import("react-i18next")>()),
+    useTranslation: () => ({
+      t: englishT,
+      i18n: { language: "en", exists: () => true },
+    }),
+  };
+});
+
+const seed = (...events: OpenHandsEvent[]) =>
+  act(() => useEventStore.getState().addEvents(events));
+
+const renderCell = (cell: ACPToolCallEvent, historyComplete = true) =>
+  renderWithProviders(
+    <SubagentHistoryContext.Provider value={historyComplete}>
+      <AcpToolCallCell event={cell} depth={0} />
+    </SubagentHistoryContext.Provider>,
+  );
+
+const rowOf = (sessionId: string) => {
+  const row = document.querySelector<HTMLElement>(
+    `[data-testid="subagent-row"][data-acp-session-id="${sessionId}"]`,
+  );
+  if (!row) throw new Error(`no row for ${sessionId}`);
+  return row;
+};
+
+const user = userEvent.setup();
+
+/** Expand a row and return its transcript. */
+const expandRow = async (sessionId: string) => {
+  await user.click(
+    within(rowOf(sessionId)).getAllByTestId("subagent-row-toggle")[0],
+  );
+  return within(rowOf(sessionId)).getAllByTestId("subagent-transcript")[0];
+};
+
+describe("sub-agents under the call that spawned them", () => {
+  beforeEach(() => {
+    useEventStore.getState().clearEvents();
+  });
+
+  it("shows a collapsed summary counting children by state", () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1" }),
+      child(3, "n3", { cell: "c1" }),
+      child(4, "n4", { cell: "c1" }),
+      child(5, "n2", { cell: "c1", state: "idle", stopReason: "end_turn" }),
+      child(6, "n4", { cell: "c1", state: "idle" }),
+    );
+
+    renderCell(cell);
+
+    const toggle = screen.getByTestId("subagent-block-toggle");
+    expect(toggle).toHaveTextContent("3 sub-agents · 2 done · 1 running");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(toggle).getByTestId("spinner-icon")).toBeInTheDocument();
+    expect(screen.getByTestId("subagent-block")).toHaveAttribute(
+      "data-subagent-count",
+      "3",
+    );
+    expect(screen.queryByTestId("subagent-row")).not.toBeInTheDocument();
+  });
+
+  // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
+  it("expands to each child's cells and their own sub-agents", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1" }),
+      call(3, "c2", { session: "n2" }),
+      child(4, "n3", { parent: "n2", cell: "c2" }),
+      call(5, "c3", { session: "n3" }),
+      child(6, "n4", { parent: "n3", cell: "c3" }),
+    );
+    renderCell(cell);
+
+    await user.click(screen.getByTestId("subagent-block-toggle"));
+    const n2Cell = within(await expandRow("n2")).getByTestId("acp-tool-call");
+    expect(n2Cell).toHaveAttribute("data-acp-session-id", "n2");
+    expect(n2Cell).toHaveAttribute("data-acp-tool-call-id", "c2");
+    await user.click(within(n2Cell).getByTestId("subagent-block-toggle"));
+    const n3Cell = within(await expandRow("n3")).getByTestId("acp-tool-call");
+    await user.click(within(n3Cell).getByTestId("subagent-block-toggle"));
+
+    expect(n3Cell).toHaveAttribute("data-acp-tool-call-id", "c3");
+    expect(rowOf("n2")).toContainElement(rowOf("n3"));
+    expect(n3Cell).toContainElement(rowOf("n4"));
+  });
+
+  // @spec SUB-006 — Each sub-agent shows its latest reported cost; costs are never added
+  it("shows each child's latest cost and never a sum", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1", cost: 0.0004 }),
+      child(3, "n3", { cell: "c1", cost: 0.0002 }),
+      child(4, "n2", { cell: "c1", cost: 0.0009 }),
+    );
+    renderCell(cell);
+
+    await user.click(screen.getByTestId("subagent-block-toggle"));
+
+    expect(within(rowOf("n2")).getByTestId("subagent-cost")).toHaveTextContent(
+      "$0.0009",
+    );
+    expect(within(rowOf("n3")).getByTestId("subagent-cost")).toHaveTextContent(
+      "$0.0002",
+    );
+    expect(screen.getByTestId("subagent-block-toggle")).not.toHaveTextContent(
+      "$",
+    );
+  });
+
+  // @spec SUB-005 — Each sub-agent shows its latest state; an unconfirmed state never shows a spinner
+  it("shows the last known state without a spinner after a reconnect", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1", cancellable: true }),
+      reconnect(3, "n2", { cell: "c1" }),
+    );
+    renderCell(cell);
+
+    const toggle = screen.getByTestId("subagent-block-toggle");
+    await user.click(toggle);
+
+    const row = rowOf("n2");
+    expect(row).toHaveAttribute("data-subagent-status", "unconfirmed");
+    expect(row).toHaveAttribute("data-subagent-stale");
+    expect(within(row).getByTestId("subagent-status")).toHaveTextContent(
+      "running · last known",
+    );
+    expect(within(row).queryByTestId("spinner-icon")).not.toBeInTheDocument();
+    expect(toggle).toHaveTextContent(
+      "1 sub-agent · 1 not confirmed since reconnecting",
+    );
+    expect(
+      within(toggle).queryByTestId("spinner-icon"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a child's task first and its answer last", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1", title: "Summarize CS101" }),
+      message(3, "task", { from: ROOT_ID, to: "n2", text: "Summarize CS101." }),
+      text(4, "n2", "Reading the catalog.", { thought: true }),
+      call(5, "c2", { session: "n2" }),
+      message(6, "answer", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "3cr, 0 prereqs — light\nCS101 has no prerequisites.",
+      }),
+      child(7, "n2", { cell: "c1", state: "idle", stopReason: "end_turn" }),
+    );
+    renderCell(cell);
+    await user.click(screen.getByTestId("subagent-block-toggle"));
+
+    const row = rowOf("n2");
+    expect(within(row).getByTestId("subagent-answer")).toHaveTextContent(
+      /^3cr, 0 prereqs — light$/,
+    );
+    expect(within(row).getByTestId("subagent-tool-calls")).toHaveTextContent(
+      "1 tool call",
+    );
+    const entries = [...(await expandRow("n2")).children];
+
+    expect(entries[0]).toHaveAttribute("data-testid", "subagent-task");
+    expect(entries[0]).toHaveTextContent("Summarize CS101.");
+    expect(entries.at(-1)).toHaveTextContent("To the main agent");
+    expect(entries.at(-1)).toHaveTextContent("CS101 has no prerequisites.");
+    expect(entries).toHaveLength(4);
+  });
+
+  // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
+  it("says earlier activity is loading while the cell's start is missing", () => {
+    const cell = call(9, "c1", { status: "completed" });
+    seed(cell, child(8, "n2", { cell: "c1" }));
+
+    const { unmount } = renderCell(cell, false);
+    expect(screen.getByTestId("subagent-loading-earlier")).toHaveTextContent(
+      "Loading earlier sub-agent activity…",
+    );
+    unmount();
+
+    renderCell(cell, true);
+    expect(
+      screen.queryByTestId("subagent-loading-earlier"),
+    ).not.toBeInTheDocument();
+  });
+});
