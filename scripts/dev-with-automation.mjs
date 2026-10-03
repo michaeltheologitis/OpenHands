@@ -1391,20 +1391,39 @@ function signalService({ proc, untilOutputCloses }, signal) {
   signalProcessTree(proc, signal, { evenIfLeaderExited: untilOutputCloses });
 }
 
+// How long stopServices() waits, after SIGKILL, for the output of a service
+// that runs until its output closes. A child no signal reaches (one that left
+// its process group, or on Windows any child once the command has exited) can
+// hold it open for good; 3 s plus this stays well inside the desktop app's 6 s
+// quit safety net.
+const OUTPUT_CLOSE_WAIT_MS = 1000;
+
 /**
  * Stop every service this launcher is running: SIGTERM to each process tree,
  * SIGKILL to any still running 3 s later. Resolves once all have ended; does
- * not exit the launcher.
+ * not exit the launcher. A service that runs until its output closes is waited
+ * for at most OUTPUT_CLOSE_WAIT_MS after its SIGKILL, then dropped.
  */
 async function stopServices() {
   const running = [...processes].filter(([, service]) =>
     isServiceRunning(service),
   );
-  const ended = Promise.all(running.map(([, service]) => service.whenEnded));
+  let stopWaiting;
+  const waitedEnough = new Promise((done) => {
+    stopWaiting = done;
+  });
+  const ended = Promise.all(
+    running.map(([, service]) =>
+      service.untilOutputCloses
+        ? Promise.race([service.whenEnded, waitedEnough])
+        : service.whenEnded,
+    ),
+  );
   for (const [name, service] of running) {
     logService(name, "Stopping...", c.dim);
     signalService(service, "SIGTERM");
   }
+  let giveUp = null;
   const forceStop = setTimeout(() => {
     for (const [name, service] of running) {
       if (isServiceRunning(service)) {
@@ -1412,9 +1431,17 @@ async function stopServices() {
         signalService(service, "SIGKILL");
       }
     }
+    giveUp = setTimeout(stopWaiting, OUTPUT_CLOSE_WAIT_MS);
   }, FORCE_STOP_DELAY_MS);
   await ended;
   clearTimeout(forceStop);
+  clearTimeout(giveUp);
+  for (const [name, service] of running) {
+    if (isServiceRunning(service)) {
+      logService(name, "Output still open after SIGKILL; not waiting", c.dim);
+      processes.delete(name);
+    }
+  }
 }
 
 function shutdown() {

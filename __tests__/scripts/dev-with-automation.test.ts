@@ -2143,6 +2143,41 @@ describe.skipIf(process.platform === "win32")(
       }
     }, 30_000);
 
+    it("quitting while a phase waits on a background child that left its process group still exits within 6 s", async () => {
+      const command = [
+        process.execPath,
+        "-e",
+        'const child = require("node:child_process").spawn("sleep", ["300"], { detached: true, stdio: "inherit" }); child.unref(); console.log(process.pid, child.pid);',
+      ];
+      const app = packagedApp({
+        setup: { command, phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+      let child: number | undefined;
+
+      try {
+        expect(
+          await waitUntil(() => !!printedPids(launch.output(), "before-start")),
+          launch.output(),
+        ).toBe(true);
+        let leader: number;
+        [leader, child] = printedPids(launch.output(), "before-start")!;
+        expect(await waitUntil(() => hasExited(leader))).toBe(true);
+
+        launch.child.kill("SIGTERM");
+
+        expect(
+          await Promise.race([
+            launch.exited,
+            delay(6_000).then(() => "still running"),
+          ]),
+        ).toBe(0);
+      } finally {
+        await launch.stop();
+        if (child && !hasExited(child)) process.kill(child, "SIGKILL");
+      }
+    }, 30_000);
+
     it("a malformed setup in defaults.json fails the launch before anything runs", async () => {
       const app = packagedApp({
         setup: { command: "example-app setup", phases: ["before-start"] },
