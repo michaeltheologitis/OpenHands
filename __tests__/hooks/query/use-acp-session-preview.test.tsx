@@ -311,6 +311,9 @@ describe("useHomeAgentControls", () => {
     await waitFor(() =>
       expect(result.current.rejection).toBe("unknown profile 'turbo'"),
     );
+    await waitFor(() =>
+      expect(useHomeAgentOptionsStore.getState().values).toEqual({}),
+    );
 
     act(() => result.current.setOption("profile", "turbo"));
 
