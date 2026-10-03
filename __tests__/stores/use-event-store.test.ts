@@ -8,6 +8,12 @@ import {
   SecurityRisk,
 } from "#/types/agent-server/core";
 import { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
+import {
+  EMPTY_SUBAGENT_INDEX,
+  ROOT_SESSION,
+  toolCallKey,
+} from "#/utils/subagents/subagent-index";
+import { call, child } from "../helpers/subagent-events";
 
 const mockUserMessageEvent: MessageEvent = {
   id: "test-event-1",
@@ -274,5 +280,59 @@ describe("useEventStore", () => {
     // Verify events were cleared
     expect(result.current.events).toEqual([]);
     expect(result.current.uiEvents).toEqual([]);
+  });
+
+  describe("sub-agent index", () => {
+    it("folds sub-agent events with each event and each page", () => {
+      const store = useEventStore.getState();
+
+      act(() => {
+        store.addEvents([call(1, "c1"), child(2, "n2", { cell: "c1" })]);
+        useEventStore
+          .getState()
+          .addEvent(child(3, "n2", { cell: "c1", cost: 0.0004 }));
+      });
+
+      const { subagents } = useEventStore.getState();
+      expect(
+        subagents.placement.byCell.get(toolCallKey(ROOT_SESSION, "c1")),
+      ).toEqual(["n2"]);
+      expect(subagents.children.get("n2")?.latest.cost).toBe(0.0004);
+    });
+
+    it("an older page does not override a newer snapshot", () => {
+      const newest = child(9, "n2", { cell: "c1", state: "idle" });
+
+      act(() => {
+        useEventStore
+          .getState()
+          .addEvents([call(8, "c1", { status: "completed" }), newest]);
+        useEventStore
+          .getState()
+          .addEvents([call(1, "c1"), child(2, "n2", { cell: "c1" })]);
+      });
+
+      const { subagents } = useEventStore.getState();
+      expect(subagents.children.get("n2")?.latest).toBe(newest);
+      expect(subagents.needsOlderHistory).toBe(false);
+    });
+
+    it("clears the sub-agent index with the conversation", () => {
+      act(() => {
+        useEventStore
+          .getState()
+          .addEvents([call(1, "c1"), child(2, "n2", { cell: "c1" })]);
+        useEventStore
+          .getState()
+          .clearEventsForConversation("next-conversation");
+      });
+      expect(useEventStore.getState().subagents).toBe(EMPTY_SUBAGENT_INDEX);
+
+      act(() => {
+        useEventStore.getState().addEvent(child(3, "n3"));
+        useEventStore.getState().clearEvents();
+      });
+      expect(useEventStore.getState().subagents).toBe(EMPTY_SUBAGENT_INDEX);
+    });
   });
 });
