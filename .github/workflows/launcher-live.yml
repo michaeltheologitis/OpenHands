@@ -1,0 +1,94 @@
+name: Launcher live
+
+# On-demand live test of the launcher's agent-server source
+# (__tests__/scripts/agent-server-relaunch.live.test.ts): install the
+# agent-server from a pinned commit with real uv, GitHub and PyPI, then start
+# it again inside a network namespace that has no network, and require it to
+# answer /server_info. uv is installed the way the desktop build bundles it
+# (scripts/download-uv.mjs: the latest release unless a version is given).
+#
+# The source defaults to config/defaults.json `sources`, so on a branch whose
+# defaults pin a fork's commit this checks that commit; with no source there,
+# the test uses upstream's v1.50.1 commit.
+on:
+  workflow_dispatch:
+    inputs:
+      agent_server_git_repo:
+        description: "Repository to install from (default: config/defaults.json sources.agentServerGitRepo, else upstream)"
+        required: false
+        default: ""
+      agent_server_git_ref:
+        description: "Full 40-hex commit to install (default: config/defaults.json sources.agentServerGitRef, else upstream v1.50.1)"
+        required: false
+        default: ""
+      uv_version:
+        description: "uv version (default: the latest release, as the desktop build bundles)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  relaunch-offline:
+    name: Relaunch a pinned commit with the network cut
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.15"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install uv as the desktop build bundles it
+        env:
+          # Authenticates download-uv.mjs's GitHub API version lookup.
+          GITHUB_TOKEN: ${{ github.token }}
+          UV_VERSION: ${{ inputs.uv_version }}
+        run: |
+          node scripts/download-uv.mjs
+          echo "$PWD/resources/bin" >> "$GITHUB_PATH"
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor;
+      # the test needs one to cut the network without root.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Resolve the agent-server source
+        id: source
+        env:
+          INPUT_REPO: ${{ inputs.agent_server_git_repo }}
+          INPUT_REF: ${{ inputs.agent_server_git_ref }}
+        run: |
+          repo="${INPUT_REPO:-$(node -p "require('./config/defaults.json').sources?.agentServerGitRepo ?? ''")}"
+          ref="${INPUT_REF:-$(node -p "require('./config/defaults.json').sources?.agentServerGitRef ?? ''")}"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "uv $(uv --version); repo '${repo:-upstream}'; ref '${ref:-upstream v1.50.1}'"
+
+      - name: Run the live test
+        env:
+          OH_AGENT_SERVER_LIVE: "1"
+          OH_AGENT_SERVER_GIT_REPO: ${{ steps.source.outputs.repo }}
+          OH_AGENT_SERVER_GIT_REF: ${{ steps.source.outputs.ref }}
+        run: |
+          npm run make-i18n
+          npx vitest run __tests__/scripts/agent-server-relaunch.live.test.ts \
+            --reporter=default --reporter=json --outputFile.json=live-results.json
+
+      # A skipped test is not a pass: require exactly one passed test.
+      - name: Require the live test to have run and passed
+        run: |
+          node -e "
+            const r = require('./live-results.json');
+            console.log('passed', r.numPassedTests, 'skipped', r.numPendingTests, 'failed', r.numFailedTests);
+            process.exit(r.numPassedTests === 1 && r.numFailedTests === 0 ? 0 : 1);
+          "
