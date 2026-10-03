@@ -1,5 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  test,
+  vi,
+  type MockInstance,
+} from "vitest";
+import {
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -32,6 +42,9 @@ import { AgentState } from "#/types/agent-state";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useGoalStore } from "#/stores/goal-store";
 import { act } from "@testing-library/react";
+import EventService from "#/api/event-service/event-service.api";
+import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-index";
+import { at, call, child, text } from "../../helpers/subagent-events";
 
 const mockSend = vi.fn();
 vi.mock("#/hooks/use-send-message", () => ({
@@ -664,6 +677,124 @@ describe("ChatInterface - Scroll-up loads older events", () => {
     // gated on `conversationUserEventsExist` and stayed hidden here,
     // leaving a blank chat with nothing to scroll).
     expect(scrollContainer!.children.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ChatInterface - Sub-agent history backfill", () => {
+  const PAGE_SIZE = 50;
+  let queryClient: QueryClient;
+  let searchEvents: MockInstance<typeof EventService.searchEvents>;
+
+  /** `count` of a child's own text runs, at ticks counting down from `from`. */
+  const filler = (from: number, count: number) =>
+    Array.from({ length: count }, (_, offset) =>
+      text(from - offset, "n2", `step ${from - offset}`),
+    );
+
+  const olderPageRequests = () =>
+    searchEvents.mock.calls
+      .map(([, , , options]) => options?.timestampLt)
+      .filter((timestamp) => timestamp !== undefined);
+
+  beforeEach(async () => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useErrorMessageStore.setState({ errorMessage: null });
+    (useConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: {},
+    });
+    (
+      useUnifiedUploadFiles as unknown as ReturnType<typeof vi.fn>
+    ).mockReturnValue({ mutateAsync: vi.fn(), isLoading: false });
+
+    // The real hook, so pages flow through EventService into the store.
+    const actual = await vi.importActual<
+      typeof import("#/hooks/use-load-older-events")
+    >("#/hooks/use-load-older-events");
+    vi.mocked(useLoadOlderEvents).mockImplementation(actual.useLoadOlderEvents);
+    const userConversation =
+      await import("#/hooks/query/use-user-conversation");
+    vi.spyOn(userConversation, "useUserConversation").mockReturnValue({
+      data: {
+        conversation_id: "test-conversation-id",
+        conversation_url: "https://runtime.example.com",
+        session_api_key: "k",
+        conversation_version: "V1",
+      },
+    } as unknown as ReturnType<typeof userConversation.useUserConversation>);
+    vi.spyOn(EventService, "getEventCount").mockResolvedValue(0);
+
+    // The chat overflows and the user is at the bottom, so only the
+    // sub-agent backfill, not the scroll-up loader, asks for older pages.
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(500);
+    vi.spyOn(Element.prototype, "scrollTop", "get").mockReturnValue(4500);
+
+    // The newest page: a spawning call's terminal event and a child in it.
+    act(() => {
+      const store = useEventStore.getState();
+      store.clearEventsForConversation("test-conversation-id");
+      store.addEvents([
+        call(900, "c1", { status: "completed" }),
+        child(800, "n2", { cell: "c1" }),
+      ]);
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useEventStore.getState().clearEvents();
+    vi.restoreAllMocks();
+  });
+
+  // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
+  it("loads older pages until the spawning call's start is loaded", async () => {
+    const pageWithoutStart = filler(700, PAGE_SIZE);
+    const pageWithStart = [...filler(600, PAGE_SIZE - 1), call(100, "c1")];
+    searchEvents = vi
+      .spyOn(EventService, "searchEvents")
+      .mockImplementation(async (_id, _url, _key, options = {}) => {
+        if (!options.timestampLt) {
+          return { items: [], next_page_id: "newest" };
+        }
+        const page =
+          options.timestampLt === at(800) ? pageWithoutStart : pageWithStart;
+        return { items: [...page].reverse(), next_page_id: "older" };
+      });
+
+    renderWithQueryClient(<ChatInterface />, queryClient);
+
+    await waitFor(() =>
+      expect(
+        useEventStore
+          .getState()
+          .subagents.toolCalls.get(toolCallKey(ROOT_SESSION, "c1"))
+          ?.startLoaded,
+      ).toBe(true),
+    );
+    expect(olderPageRequests()).toEqual([at(800), at(651)]);
+    expect(useEventStore.getState().subagents.needsOlderHistory).toBe(false);
+  });
+
+  it("stops loading older pages after a failure", async () => {
+    searchEvents = vi
+      .spyOn(EventService, "searchEvents")
+      .mockImplementation(async (_id, _url, _key, options = {}) => {
+        if (!options.timestampLt) {
+          return { items: [], next_page_id: "newest" };
+        }
+        throw new Error("Older events request failed");
+      });
+
+    renderWithQueryClient(<ChatInterface />, queryClient);
+    expect(
+      await screen.findByText("Older events request failed"),
+    ).toBeInTheDocument();
+
+    act(() => useEventStore.getState().addEvent(text(950, "n2", "later")));
+
+    expect(olderPageRequests()).toEqual([at(800)]);
   });
 });
 
