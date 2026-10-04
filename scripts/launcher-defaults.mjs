@@ -28,15 +28,6 @@ import path from "node:path";
 
 const DEFAULTS_FILE = "config/defaults.json";
 
-/** The phases a setup command can run in, in launch order. */
-export const SETUP_PHASES = Object.freeze(["before-start", "after-ready"]);
-
-/**
- * @typedef {object} SetupConfig
- * @property {string[]} command  argv; command[0] is resolved on PATH; run without a shell.
- * @property {("before-start" | "after-ready")[]} phases  non-empty, no duplicates, in SETUP_PHASES order.
- */
-
 // Any of these in the environment names the agent-server's source, so a git
 // ref from defaults.json must not outrank it.
 const AGENT_SERVER_SOURCE_VARIABLES = [
@@ -44,49 +35,6 @@ const AGENT_SERVER_SOURCE_VARIABLES = [
   "OH_AGENT_SERVER_GIT_REF",
   "OH_AGENT_SERVER_VERSION",
 ];
-
-/**
- * Expand a leading "~" or "~/" to `home`; return the result if it is absolute.
- * @param {string} value
- * @param {string} name  how errors name the value, e.g. "paths.stateDir in config/defaults.json"
- * @param {string} [home] defaults to os.homedir()
- * @returns {string} an absolute path
- * @throws {Error} `${name} must be an absolute path or start with ~/, got: ${value}`
- */
-export function expandHomePath(value, name, home = homedir()) {
-  const expanded =
-    value === "~"
-      ? home
-      : typeof value === "string" && value.startsWith("~/")
-        ? path.join(home, value.slice(2))
-        : value;
-  if (typeof expanded !== "string" || !path.isAbsolute(expanded)) {
-    throw new Error(
-      `${name} must be an absolute path or start with ~/, got: ${value}`,
-    );
-  }
-  return expanded;
-}
-
-/**
- * Accept an https:// or ssh:// URL with no whitespace; reject anything else (an
- * scp-style git@host:path, a bare owner/repo, a git+ prefix, http://, file://).
- * uv fetches a git requirement over `git+https` or `git+ssh`; the launcher adds
- * the `git+` prefix itself.
- *
- * @param {unknown} value
- * @param {string} name  e.g. "OH_AGENT_SERVER_GIT_REPO" or "sources.agentServerGitRepo in config/defaults.json"
- * @returns {string} the value
- * @throws {Error} `${name} must be an https or ssh git URL, got: ${value}`
- */
-export function validateGitRepoUrl(value, name) {
-  const url =
-    typeof value === "string" && !/\s/.test(value) ? URL.parse(value) : null;
-  if ((url?.protocol === "https:" || url?.protocol === "ssh:") && url.host) {
-    return value;
-  }
-  throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
-}
 
 /**
  * The environment entries config/defaults.json supplies: only variables `env`
@@ -157,6 +105,53 @@ export function applyLauncherDefaults(env, defaults) {
   Object.assign(env, filled);
   return Object.keys(filled).sort();
 }
+
+/**
+ * `value` with a leading "~" or "~/" expanded to `home`; throws, naming the
+ * value `name`, unless that is an absolute path.
+ */
+function expandHomePath(value, name, home) {
+  const expanded =
+    value === "~"
+      ? home
+      : typeof value === "string" && value.startsWith("~/")
+        ? path.join(home, value.slice(2))
+        : value;
+  if (typeof expanded !== "string" || !path.isAbsolute(expanded)) {
+    throw new Error(
+      `${name} must be an absolute path or start with ~/, got: ${value}`,
+    );
+  }
+  return expanded;
+}
+
+/**
+ * Accept an https:// or ssh:// URL with no whitespace; reject anything else (an
+ * scp-style git@host:path, a bare owner/repo, a git+ prefix, http://, file://).
+ * The value is a plain repository URL: uv's `git+` scheme is not part of it.
+ *
+ * @param {unknown} value
+ * @param {string} name  e.g. "OH_AGENT_SERVER_GIT_REPO" or "sources.agentServerGitRepo in config/defaults.json"
+ * @returns {string} the value
+ * @throws {Error} `${name} must be an https or ssh git URL, got: ${value}`
+ */
+export function validateGitRepoUrl(value, name) {
+  const url =
+    typeof value === "string" && !/\s/.test(value) ? URL.parse(value) : null;
+  if ((url?.protocol === "https:" || url?.protocol === "ssh:") && url.host) {
+    return value;
+  }
+  throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
+}
+
+/** The phases a setup command can run in, in launch order. */
+const SETUP_PHASES = Object.freeze(["before-start", "after-ready"]);
+
+/**
+ * @typedef {object} SetupConfig
+ * @property {string[]} command  argv; command[0] is resolved on PATH; run without a shell.
+ * @property {("before-start" | "after-ready")[]} phases  non-empty, no duplicates, in SETUP_PHASES order.
+ */
 
 /**
  * The setup command of `defaults`, validated, or null when setup.command is

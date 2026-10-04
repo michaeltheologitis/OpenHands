@@ -53,8 +53,6 @@ const DEFAULT_AGENT_SERVER_PACKAGE = SHARED_DEFAULTS.packages.agentServer;
 /** Upstream's repository, used when OH_AGENT_SERVER_GIT_REPO is unset. */
 export const DEFAULT_AGENT_SERVER_GIT_REPO =
   "https://github.com/OpenHands/software-agent-sdk";
-// A ref uv can reuse from its cache: a full commit pins the code, so it is
-// installed once and later launches need no network.
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 const LOCAL_AGENT_SERVER_SUBDIRS = [
   "openhands-agent-server",

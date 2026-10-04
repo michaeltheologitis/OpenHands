@@ -76,7 +76,6 @@ import {
 import {
   applyLauncherDefaults,
   readSetupConfig,
-  SETUP_PHASES,
 } from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 import {
@@ -1255,7 +1254,7 @@ function startAutomationBackend(config) {
 // the ingress start. Anything but exit 0 stops the launch.
 
 /** How long one setup phase may run before it is stopped. */
-export const SETUP_COMMAND_TIMEOUT_MS = 15 * 60_000;
+const SETUP_COMMAND_TIMEOUT_MS = 15 * 60_000;
 
 /**
  * A setup command that did not exit 0. Its `name` is "SetupCommandError", so
@@ -1272,14 +1271,10 @@ export class SetupCommandError extends Error {
    *   signal: string | null,
    * }} details
    */
-  constructor(message, { phase, command, reason, exitCode, signal }) {
+  constructor(message, details) {
     super(message);
     this.name = "SetupCommandError";
-    this.phase = phase;
-    this.command = command;
-    this.reason = reason;
-    this.exitCode = exitCode;
-    this.signal = signal;
+    Object.assign(this, details);
   }
 }
 
@@ -1289,7 +1284,7 @@ export class SetupCommandError extends Error {
  * @param {"before-start" | "after-ready"} phase
  * @returns {Record<string, string>}
  */
-export function buildSetupEnv(config, phase) {
+function buildSetupEnv(config, phase) {
   const stateDir = resolve(config.stateDir);
   return {
     OH_CANVAS_SETUP_PHASE: phase,
@@ -2032,7 +2027,7 @@ async function main(options = {}) {
     );
   }
 
-  // 3. The setup command's after-ready phase, before automation, the frontend
+  // The setup command's after-ready phase, before automation, the frontend
   // and the ingress start, so what it registers through the agent-server
   // exists before the first screen asks for it. Only the agent-server is
   // running here, so a failure stops it before failing the launch.
@@ -2051,12 +2046,12 @@ async function main(options = {}) {
     );
   }
 
-  // 4. Start automation backend
+  // 3. Start automation backend
   if (config.launchAutomation) {
     startAutomationBackend(config);
   }
 
-  // 5. Start frontend server (Vite dev server OR static server)
+  // 4. Start frontend server (Vite dev server OR static server)
   if (config.launchFrontend) {
     if (useStaticMode) {
       startStaticFrontend(config, staticDir);
@@ -2065,10 +2060,10 @@ async function main(options = {}) {
     }
   }
 
-  // 6. Wait for services to be ready
+  // 5. Wait for services to be ready
   await delay(2000);
 
-  // 7. Start ingress proxy (routes traffic only to running services)
+  // 6. Start ingress proxy (routes traffic only to running services)
   startIngress(config);
 
   // Wait for ingress to start
@@ -2174,7 +2169,6 @@ export {
   spawnService,
   commandExists,
   validateLocalAutomationPath,
-  SETUP_PHASES,
   logService,
   logStep,
   logSuccess,
