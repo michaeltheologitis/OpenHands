@@ -170,6 +170,19 @@ class CanvasExtensionsService {
     );
   }
 
+  /** GET …/installed/{name}/panels/{panelId}/icon with the session key. */
+  static async fetchPanelIcon(
+    name: string,
+    panelId: string,
+    backend?: Backend,
+  ): Promise<Blob> {
+    const client = backend ? getClientForBackend(backend) : getClient();
+    return client.get<Blob>(
+      `${installedExtensionPath(name)}/panels/${encodeURIComponent(panelId)}/icon`,
+      { responseType: "blob" },
+    );
+  }
+
   static async requestAgentServer<T = unknown>(
     request: CanvasExtensionAgentServerRequest,
     backend?: Backend,

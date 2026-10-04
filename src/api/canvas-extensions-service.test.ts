@@ -205,4 +205,28 @@ describe("CanvasExtensionsService", () => {
     ).rejects.toThrow("root-relative path");
     expect(AgentServerClient).not.toHaveBeenCalled();
   });
+
+  it("fetches a panel icon as an authenticated blob from the captured backend", async () => {
+    const icon = new Blob(["<svg/>"], { type: "image/svg+xml" });
+    get.mockResolvedValue(icon);
+
+    await expect(
+      CanvasExtensionsService.fetchPanelIcon(
+        "demo/x",
+        "insights",
+        localBackend,
+      ),
+    ).resolves.toBe(icon);
+
+    expect(AgentServerClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: localBackend.host,
+        apiKey: localBackend.apiKey,
+      }),
+    );
+    expect(get).toHaveBeenCalledWith(
+      "/api/canvas-extensions/installed/demo%2Fx/panels/insights/icon",
+      { responseType: "blob" },
+    );
+  });
 });
