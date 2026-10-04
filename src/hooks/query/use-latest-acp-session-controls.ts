@@ -23,7 +23,8 @@ function newestControlsEvent(
  * The conversation's newest `ACPSessionControlsEvent`: the newer, by
  * timestamp, of the event store's newest one (live and preloaded events) and
  * one REST search for it by kind, which finds it however long ago it was sent.
- * Replaced, never merged: each event carries both lists in full.
+ * Replaced, never merged: each event carries both lists in full. While
+ * disabled it neither searches nor scans the event store.
  */
 export function useLatestAcpSessionControls(
   conversationId: string | null,
@@ -35,7 +36,7 @@ export function useLatestAcpSessionControls(
       ? newestControlsEvent(state.events)
       : null,
   );
-  const { data: searched } = useQuery({
+  const { data: searched = null } = useQuery({
     queryKey: ACP_SESSION_CONTROLS_QUERY_KEYS.latest(
       backend.id,
       conversationId ?? "",
@@ -59,8 +60,6 @@ export function useLatestAcpSessionControls(
     meta: { disableToast: true },
   });
 
-  if (!enabled) return null;
-  const rest = searched ?? null;
-  if (!live || !rest) return live ?? rest;
-  return (rest.timestamp ?? "") > (live.timestamp ?? "") ? rest : live;
+  if (!live || !searched) return live ?? searched;
+  return (searched.timestamp ?? "") > (live.timestamp ?? "") ? searched : live;
 }
