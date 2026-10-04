@@ -1,6 +1,13 @@
 import type { OpenHandsEvent } from "#/types/agent-server/core";
-import type { SubagentAnchor } from "#/utils/subagents/subagent-index";
-import { compareTimestamps } from "#/utils/subagents/subagent-keys";
+import { isACPToolCallEvent } from "#/types/agent-server/type-guards";
+import type {
+  SubagentAnchor,
+  SubagentRecords,
+} from "#/utils/subagents/subagent-index";
+import {
+  compareTimestamps,
+  toolCallKey,
+} from "#/utils/subagents/subagent-keys";
 import type { RenderedItem } from "../group-events";
 
 export type MainFlowItem =
@@ -16,10 +23,19 @@ const firstEventOf = (item: RenderedItem): OpenHandsEvent => {
   return item.events[0];
 };
 
-/** When an item starts: its first event's timestamp, unless told otherwise. */
-export type ItemStart = (event: OpenHandsEvent) => string | undefined;
-
-const timestampOf: ItemStart = (event) => event.timestamp;
+/**
+ * An item's first event's time. An ACP call's item holds its terminal event,
+ * so a call starts at its record's `firstAt`.
+ */
+const startOf = (
+  item: RenderedItem,
+  toolCalls: SubagentRecords["toolCalls"],
+): string | undefined => {
+  const event = firstEventOf(item);
+  if (!isACPToolCallEvent(event)) return event.timestamp;
+  const key = toolCallKey(event.acp_session_id, event.tool_call_id);
+  return toolCalls.get(key)?.firstAt ?? event.timestamp;
+};
 
 /**
  * Put each anchored root-level child before the first rendered item that
@@ -29,13 +45,13 @@ const timestampOf: ItemStart = (event) => event.timestamp;
 export function interleaveSubagentAnchors(
   items: readonly RenderedItem[],
   anchors: readonly SubagentAnchor[],
-  startOf: ItemStart = timestampOf,
+  toolCalls: SubagentRecords["toolCalls"],
 ): readonly MainFlowItem[] {
   if (anchors.length === 0) return items;
   const flow: MainFlowItem[] = [];
   let next = 0;
   for (const item of items) {
-    const start = startOf(firstEventOf(item));
+    const start = startOf(item, toolCalls);
     while (
       start !== undefined &&
       next < anchors.length &&

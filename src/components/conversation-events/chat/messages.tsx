@@ -100,8 +100,7 @@ export const Messages: React.FC<MessagesProps> = React.memo(
     );
 
     // Sub-agents placed in the root's flow without a spawning call go where
-    // the root sent them their task, else where they were announced. A call's
-    // item starts when the call did, not when its terminal event replaced it.
+    // the root sent them their task, else where they were announced.
     const placedAtRoot = useSubagents((index) =>
       index.placement.byAnchor.get(ROOT_SESSION),
     );
@@ -118,12 +117,7 @@ export const Messages: React.FC<MessagesProps> = React.memo(
             ROOT_SESSION,
             historyComplete,
           ),
-          (event) =>
-            isACPToolCallEvent(event)
-              ? (toolCalls.get(
-                  toolCallKey(event.acp_session_id, event.tool_call_id),
-                )?.firstAt ?? event.timestamp)
-              : event.timestamp,
+          toolCalls,
         ),
       [
         renderedItems,
