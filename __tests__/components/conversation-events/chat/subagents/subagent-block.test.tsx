@@ -256,6 +256,37 @@ describe("sub-agents under the call that spawned them", () => {
     expect(entries).toHaveLength(4);
   });
 
+  // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
+  it("shows a child's task to its own child only as that child's task", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1" }),
+      call(3, "c2", { session: "n2" }),
+      child(4, "n3", { parent: "n2", cell: "c2", title: "Read CS201" }),
+      message(5, "task-n3", {
+        transcript: "n2",
+        from: "n2",
+        to: "n3",
+        text: "Check the prerequisites of CS201.",
+      }),
+    );
+    renderCell(cell);
+
+    await user.click(screen.getByTestId("subagent-block-toggle"));
+    const n2Transcript = await expandRow("n2");
+    await user.click(within(n2Transcript).getByTestId("subagent-block-toggle"));
+    const n3Transcript = await expandRow("n3");
+
+    expect(within(n3Transcript).getByTestId("subagent-task")).toHaveTextContent(
+      "Check the prerequisites of CS201.",
+    );
+    expect(
+      screen.getAllByText("Check the prerequisites of CS201."),
+    ).toHaveLength(1);
+    expect(n2Transcript).not.toHaveTextContent("To Read CS201");
+  });
+
   // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
   it("says earlier activity is loading while the cell's start is missing", () => {
     const cell = call(9, "c1", { status: "completed" });

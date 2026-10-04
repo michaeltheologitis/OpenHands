@@ -936,6 +936,7 @@ describe("ChatInterface - Auto-scroll on submit (issue #817)", () => {
 
   afterEach(() => {
     useOptimisticUserMessageStore.getState().clearPendingMessages();
+    useEventStore.getState().clearEvents();
   });
 
   it("scrolls to bottom when a new prompt is submitted while the user is scrolled up", async () => {
@@ -1068,6 +1069,57 @@ describe("ChatInterface - Auto-scroll on submit (issue #817)", () => {
     // Assert: the bottom-following effect scrolled the banner into view.
     // Without wiring the active goal status into that effect, scrollWrites
     // would stay empty.
+    await waitFor(() => {
+      expect(scrollWrites).toContain(10000);
+    });
+  });
+
+  it("follows sub-agent content into view as it grows without new root items", async () => {
+    act(() => {
+      const store = useEventStore.getState();
+      store.clearEventsForConversation("test-conversation-id");
+      store.addEvents([call(1, "c1"), child(2, "n2", { cell: "c1" })]);
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/test-conversation-id"]}>
+          <Routes>
+            <Route path=":conversationId" element={<ChatInterface />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const scrollContainer = document.querySelector(
+      "[data-testid='chat-scroll-container']",
+    ) as HTMLElement;
+    // Frames run in order, so the mount-time scroll has landed after this one.
+    await new Promise((r) => {
+      requestAnimationFrame(r);
+    });
+    const scrollWrites: number[] = [];
+    Object.defineProperty(scrollContainer, "scrollTop", {
+      configurable: true,
+      get: () => 9200,
+      set: (value: number) => {
+        scrollWrites.push(value);
+      },
+    });
+    Object.defineProperty(scrollContainer, "scrollHeight", {
+      configurable: true,
+      writable: true,
+      value: 10000,
+    });
+    Object.defineProperty(scrollContainer, "clientHeight", {
+      configurable: true,
+      writable: true,
+      value: 800,
+    });
+
+    // A child's own text: the sub-agent index grows, the root's flow does not.
+    act(() => {
+      useEventStore.getState().addEvent(text(3, "n2", "Reading the catalog."));
+    });
+
     await waitFor(() => {
       expect(scrollWrites).toContain(10000);
     });

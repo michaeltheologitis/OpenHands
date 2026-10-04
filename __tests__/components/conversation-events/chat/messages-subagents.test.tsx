@@ -104,6 +104,23 @@ describe("Messages with ACP sub-agent sessions", () => {
     expect(isBefore(rowOf("n2"), second)).toBe(true);
   });
 
+  // @spec SUB-002 — Without a loaded spawning call, a sub-agent renders at its parent's message to it, else at its announcement
+  it("keeps a root call where it started when a child's task lands before it ends", () => {
+    seed(
+      call(1, "c1"),
+      child(2, "n2"),
+      message(3, "task", { from: ROOT_ID, to: "n2", text: "Do part two." }),
+      call(5, "c1", { status: "completed" }),
+      call(7, "c2", { status: "completed" }),
+    );
+
+    renderWithProviders(<Chat />);
+
+    const [first, second] = cards();
+    expect(isBefore(first, rowOf("n2"))).toBe(true);
+    expect(isBefore(rowOf("n2"), second)).toBe(true);
+  });
+
   // @spec SUB-003 — A sub-agent whose parent session is not in the conversation is shown apart, never in the root's flow
   it("shows children of a missing parent apart once history is complete", () => {
     seed(call(1, "c1"), child(2, "n5", { parent: "ghost" }));
