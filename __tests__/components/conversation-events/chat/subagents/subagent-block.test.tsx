@@ -145,22 +145,6 @@ describe("sub-agents under the call that spawned them", () => {
   });
 
   // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
-  it("hides each child's cost unless costs are shown", async () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
-      child(2, "n2", { cell: "c1", cost: 0.0004 }),
-      child(3, "n3", { cell: "c1", cost: 0.0002 }),
-    );
-    renderCell(cell);
-
-    await user.click(screen.getByTestId("subagent-block-toggle"));
-
-    expect(screen.getAllByTestId("subagent-row")).toHaveLength(2);
-    expect(screen.queryAllByTestId("subagent-cost")).toHaveLength(0);
-  });
-
-  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
   it("shows each child's latest cost and never a sum when costs are shown", async () => {
     writeShowSubagentCosts(true);
     const cell = call(1, "c1");

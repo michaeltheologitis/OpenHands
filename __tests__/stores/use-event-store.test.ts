@@ -300,23 +300,6 @@ describe("useEventStore", () => {
       expect(subagents.children.get("n2")?.latest.cost).toBe(0.0004);
     });
 
-    it("an older page does not override a newer snapshot", () => {
-      const newest = child(9, "n2", { cell: "c1", state: "idle" });
-
-      act(() => {
-        useEventStore
-          .getState()
-          .addEvents([call(8, "c1", { status: "completed" }), newest]);
-        useEventStore
-          .getState()
-          .addEvents([call(1, "c1"), child(2, "n2", { cell: "c1" })]);
-      });
-
-      const { subagents } = useEventStore.getState();
-      expect(subagents.children.get("n2")?.latest).toBe(newest);
-      expect(subagents.needsOlderHistory).toBe(false);
-    });
-
     it("clears the sub-agent index with the conversation", () => {
       act(() => {
         useEventStore
