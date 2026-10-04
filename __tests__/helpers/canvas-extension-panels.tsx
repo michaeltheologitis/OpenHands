@@ -68,7 +68,7 @@ export function demoPageShows(text: string) {
 }
 
 const loadDemoPanelModule = () =>
-  import("#/fixtures/canvas-extensions/demo-panel/extension.js") as Promise<CanvasExtensionModule>;
+  import("#/fixtures/canvas-extensions/demo-panel/extension") as Promise<CanvasExtensionModule>;
 
 /**
  * Activate the given Apps on a local backend: the inventory and bundle
