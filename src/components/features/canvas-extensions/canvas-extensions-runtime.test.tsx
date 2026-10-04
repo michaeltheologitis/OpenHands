@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
+import { localAgentServerHasCapability } from "#/api/agent-server-compatibility";
 import {
   setActiveSelection,
   setRegisteredBackends,
@@ -17,6 +18,13 @@ import {
   CanvasExtensionsRuntimeProvider,
   useCanvasExtensionsRuntime,
 } from "./canvas-extensions-runtime";
+
+vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("#/api/agent-server-compatibility")
+  >()),
+  localAgentServerHasCapability: vi.fn(() => true),
+}));
 
 const backend: Backend = {
   id: "extension-backend",
@@ -53,6 +61,32 @@ const extension: InstalledCanvasExtensionInfo = {
   },
 };
 
+const panelExtension: InstalledCanvasExtensionInfo = {
+  ...extension,
+  manifest: {
+    ...extension.manifest!,
+    contributes: {
+      ...extension.manifest!.contributes,
+      conversation_panels: [
+        {
+          id: "insights",
+          title: "Insights",
+          icon: null,
+          tabs: [
+            { id: "overview", title: "Overview", path: "/" },
+            { id: "details", title: "Details", path: "/details" },
+          ],
+        },
+        {
+          id: "notes",
+          title: "Notes",
+          tabs: [{ id: "notes-list", title: "List", path: "/" }],
+        },
+      ],
+    },
+  },
+};
+
 function RuntimeProbe() {
   const runtime = useCanvasExtensionsRuntime();
   return (
@@ -61,6 +95,17 @@ function RuntimeProbe() {
       <span data-testid="page-href">{runtime.pages[0]?.href}</span>
       <span data-testid="runtime-error">
         {runtime.errors.get(extension.name)}
+      </span>
+      <span data-testid="runtime-notice">
+        {runtime.notices.get(extension.name)}
+      </span>
+      <span data-testid="panels">
+        {runtime.panels
+          .map(
+            (panel) =>
+              `${panel.key}=${panel.tabs.map((tab) => `${tab.contribution.id}@${tab.contribution.path}`).join(",")}`,
+          )
+          .join(" ")}
       </span>
     </div>
   );
@@ -185,5 +230,119 @@ describe("CanvasExtensionsRuntimeProvider", () => {
       ),
     );
     expect(screen.getByTestId("page-count")).toHaveTextContent("0");
+  });
+
+  describe("conversation panels", () => {
+    beforeEach(() => {
+      vi.mocked(CanvasExtensionsService.listInstalled).mockResolvedValue([
+        panelExtension,
+      ]);
+      vi.mocked(localAgentServerHasCapability).mockReturnValue(true);
+    });
+
+    const registering =
+      (...ids: string[]) =>
+      (host: CanvasExtensionHost) => {
+        for (const id of ids) host.registerPage(id, () => undefined);
+      };
+
+    it("lists a panel with its registered tabs in manifest order, paths without the leading slash", async () => {
+      renderRuntime(
+        vi.fn().mockResolvedValue({
+          activate: registering("details", "overview"),
+        }),
+      );
+
+      await waitFor(() =>
+        expect(screen.getByTestId("panels")).toHaveTextContent(
+          "demo-extension/insights=overview@,details@details",
+        ),
+      );
+      expect(screen.getByTestId("panels")).not.toHaveTextContent("notes");
+    });
+
+    it.each([
+      ["a panel's own id", "insights", 'registered panel "insights"'],
+      ["an undeclared id", "surprise", 'registered undeclared page "surprise"'],
+    ])(
+      "fails activation when an App registers %s",
+      async (_label, id, message) => {
+        renderRuntime(vi.fn().mockResolvedValue({ activate: registering(id) }));
+
+        await waitFor(() =>
+          expect(screen.getByTestId("runtime-error")).toHaveTextContent(
+            message,
+          ),
+        );
+        expect(screen.getByTestId("panels")).toBeEmptyDOMElement();
+      },
+    );
+
+    // @spec CX-004 — on an agent-server without conversation panels the refusal does not fail the App
+    it("refuses tab registrations without failing the App on an agent-server without panels", async () => {
+      vi.mocked(localAgentServerHasCapability).mockReturnValue(false);
+      vi.mocked(CanvasExtensionsService.listInstalled).mockResolvedValue([
+        extension,
+      ]);
+      const disposeTab = vi.fn();
+      const activate = vi.fn((host: CanvasExtensionHost) => {
+        disposeTab.mockImplementation(host.registerPage("overview", vi.fn()));
+        host.registerPage("dashboard", () => undefined);
+      });
+
+      renderRuntime(vi.fn().mockResolvedValue({ activate }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("page-count")).toHaveTextContent("1"),
+      );
+      expect(screen.getByTestId("runtime-error")).toBeEmptyDOMElement();
+      expect(screen.getByTestId("runtime-notice")).toHaveTextContent(
+        "SETTINGS$APPS_PANELS_UNSUPPORTED",
+      );
+      expect(screen.getByTestId("panels")).toBeEmptyDOMElement();
+      expect(() => disposeTab()).not.toThrow();
+    });
+
+    it("removes an App's panels when it is disabled", async () => {
+      const { queryClient } = renderRuntime(
+        vi.fn().mockResolvedValue({ activate: registering("overview") }),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("panels")).toHaveTextContent("insights"),
+      );
+
+      vi.mocked(CanvasExtensionsService.listInstalled).mockResolvedValue([
+        { ...panelExtension, enabled: false },
+      ]);
+      await queryClient.invalidateQueries();
+
+      await waitFor(() =>
+        expect(screen.getByTestId("panels")).toBeEmptyDOMElement(),
+      );
+    });
+
+    it("re-activates an App whose manifest panels change", async () => {
+      const moduleLoader = vi
+        .fn()
+        .mockResolvedValue({ activate: registering("overview") });
+      const { queryClient } = renderRuntime(moduleLoader);
+      await waitFor(() => expect(moduleLoader).toHaveBeenCalledTimes(1));
+
+      const panels = panelExtension.manifest!.contributes!.conversation_panels!;
+      vi.mocked(CanvasExtensionsService.listInstalled).mockResolvedValue([
+        {
+          ...panelExtension,
+          manifest: {
+            ...panelExtension.manifest!,
+            contributes: {
+              conversation_panels: [{ ...panels[0], title: "Renamed" }],
+            },
+          },
+        },
+      ]);
+      await queryClient.invalidateQueries();
+
+      await waitFor(() => expect(moduleLoader).toHaveBeenCalledTimes(2));
+    });
   });
 });

@@ -18,6 +18,16 @@ export type ConversationMode = "code" | "plan";
 
 export type CommitsPaneSection = "uncommitted";
 
+/** `${extensionName}/${panelId}`; both are kebab-case, so "/" cannot occur inside either. */
+export type ConversationAppPanelKey = `${string}/${string}`;
+
+export function toConversationAppPanelKey(
+  extensionName: string,
+  panelId: string,
+): ConversationAppPanelKey {
+  return `${extensionName}/${panelId}`;
+}
+
 export interface IMessageToSend {
   text: string;
   timestamp: number;

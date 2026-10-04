@@ -156,6 +156,24 @@ export function getCachedAgentServerInfo(options?: {
   return cachedAgentServerInfo;
 }
 
+/** Optional agent-server features Canvas detects from `/server_info`. */
+export type AgentServerCapability =
+  | "acp_session_controls_v1"
+  | "canvas_conversation_panels_v1"
+  | "canvas_app_backend_bridge_v1";
+
+/** True only for a local active backend whose cached /server_info lists the capability. */
+export function localAgentServerHasCapability(
+  capability: AgentServerCapability,
+): boolean {
+  const local = getEffectiveLocalBackend();
+  if (!local) return false;
+  const capabilities = getCachedAgentServerInfo({
+    host: local.host.replace(/\/+$/, ""),
+  })?.capabilities;
+  return Array.isArray(capabilities) && capabilities.includes(capability);
+}
+
 export function isAgentServerToolAvailable(toolName: string) {
   const availableTools = getAdvertisedTools(cachedAgentServerInfo);
   if (!Array.isArray(availableTools)) {
