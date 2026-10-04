@@ -164,6 +164,22 @@ describe("foldSubagentEvents", () => {
     ]);
   });
 
+  it("takes the agent's own report of a child call over the failure stored when the root's turn was aborted", () => {
+    const report = call(7, "c1", { session: "n2", status: "completed" });
+    const index = fold(
+      child(1, "n2"),
+      call(2, "c1", { session: "n2" }),
+      call(5, "c1", { session: "n2", status: "failed" }),
+      report,
+    );
+
+    expect(index.toolCalls.get(toolCallKey("n2", "c1"))?.latest).toBe(report);
+    expect(transcriptOf(index, "n2")).toEqual([
+      ["tool_call", toolCallKey("n2", "c1"), at(2)],
+    ]);
+    expect(index.stats.get("n2")?.toolCalls).toBe(1);
+  });
+
   it("counts a child's own calls and takes its answer from its newest message outside its children", () => {
     const index = fold(
       call(1, "c1"),
