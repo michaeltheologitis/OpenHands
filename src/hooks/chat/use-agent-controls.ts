@@ -145,6 +145,12 @@ export function useConversationAgentControls(
  * preview of the launch agent with the values the user picked. Only when the
  * home screen's agent is ACP on a local agent-server with
  * `acp_session_controls_v1`; otherwise none.
+ *
+ * They show the preview the agent last answered, and a start sends only that
+ * answer's values. A pick the agent refuses (a 422) is withdrawn: the picks
+ * return to that answer's values (none before any answer), so picking the
+ * refused value again asks again, and the agent's sentence stays until the
+ * next pick. Any other failure shows no controls; the user can still start.
  */
 // @spec ASC-004 — Only where the agent-server supports them
 export function useHomeAgentControls(
@@ -163,8 +169,6 @@ export function useHomeAgentControls(
     stored.launchKey === launch?.launchKey ? stored.values : NO_VALUES;
   const preview = useAcpSessionPreview(launch, launchContext, values);
 
-  // The last preview the agent answered for this launch agent; a refusal
-  // keeps showing it, and its values are the ones a start may send.
   const lastAnswered = React.useRef<{
     launchKey: string;
     preview: AcpSessionPreview;
@@ -186,7 +190,6 @@ export function useHomeAgentControls(
     isSdkHttpStatusError(preview.error, AGENT_REFUSAL_STATUS)
       ? getApiErrorMessage(preview.error, preview.error.message)
       : null;
-  // The agent's sentence for the pick it refused last, until the next pick.
   const lastRefusal = React.useRef<{
     launchKey: string;
     sentence: string;
@@ -195,9 +198,7 @@ export function useHomeAgentControls(
     lastRefusal.current = { launchKey: launch.launchKey, sentence: refusal };
   }
 
-  // A refused pick is withdrawn: the picks return to the values of the
-  // preview the agent last answered, which the picker shows, so picking the
-  // refused value again asks the agent again.
+  // Withdraw a refused pick.
   const launchKey = launch?.launchKey;
   const answeredValues = answered?.values ?? NO_VALUES;
   const { setValues } = stored;
@@ -206,8 +207,6 @@ export function useHomeAgentControls(
   }, [launchKey, refusal, answeredValues, setValues]);
 
   if (!launch) return enabled ? LOADING_AGENT_CONTROLS : NO_AGENT_CONTROLS;
-  // Any other failure (400, 429, 501, 502, 504, …) shows no controls; the
-  // user can still start.
   const shown = preview.isError && refusal === null ? null : answered;
   const options = shown ? pickerOptions(shown.controls) : [];
   return {

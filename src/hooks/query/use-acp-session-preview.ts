@@ -61,9 +61,8 @@ export function resolveAcpLaunchProfile(
 /**
  * What the launch agent would offer, asked with the values the user picked.
  * Each preview starts the agent once, so it runs only when the inputs (all
- * discrete user actions) change to ones the agent has not answered since the
- * home screen mounted, never on focus, and is not retried. A return to the
- * home screen asks again.
+ * discrete user actions) change to ones the agent has not answered since this
+ * hook mounted, never on focus, and is not retried. A remount asks again.
  */
 export function useAcpSessionPreview(
   launch: AcpLaunchProfile | null,
