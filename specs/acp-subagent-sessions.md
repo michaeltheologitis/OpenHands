@@ -21,6 +21,9 @@ Agent Server as `ACPSubagentEvent`, `ACPSessionMessageEvent`, `ACPSessionTextEve
 ### SUB-005: Latest state, never a stale spinner
 - [x] Each sub-agent shall show its latest state; an unconfirmed state shall never show a spinner.
 
+### SUB-008: History a fan-out needs
+- [x] Opening a conversation shall load the older history its visible sub-agents need, and no more.
+
 ### SUB-009: Agents without sub-agent sessions
 - [x] Agents without sub-agent sessions shall render as before.
 
@@ -32,3 +35,4 @@ Agent Server as `ACPSubagentEvent`, `ACPSessionMessageEvent`, `ACPSessionTextEve
   - Within a row: `subagent-title`, `subagent-status`, `subagent-answer`, `subagent-tool-calls`.
   - `subagent-transcript` (an expanded row's transcript) and `subagent-task` (the task at its top).
   - `subagent-unplaced` (sub-agents whose parent session is missing): `data-missing-parent-session-id`.
+  - `subagent-loading-earlier` ("Loading earlier sub-agent activity…").

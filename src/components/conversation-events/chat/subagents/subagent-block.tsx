@@ -7,7 +7,7 @@ import { I18nKey } from "#/i18n/declaration";
 import { cn } from "#/utils/utils";
 import { MAX_INDENTED_DEPTH, summaryLabel } from "./subagent-labels";
 import { SubagentRow } from "./subagent-row";
-import { useSubagents } from "./subagent-source";
+import { SubagentHistoryContext, useSubagents } from "./subagent-source";
 
 export interface SubagentBlockProps {
   /** `toolCallKey` of the spawning call. */
@@ -31,6 +31,10 @@ export function SubagentBlock({ cellKey, depth }: SubagentBlockProps) {
   const summary = useSubagents((index) =>
     index.placement.cellSummaries.get(cellKey),
   );
+  const startLoaded = useSubagents(
+    (index) => index.toolCalls.get(cellKey)?.startLoaded ?? false,
+  );
+  const historyComplete = React.useContext(SubagentHistoryContext);
 
   if (!sessionIds || !summary) return null;
 
@@ -61,6 +65,14 @@ export function SubagentBlock({ cellKey, depth }: SubagentBlockProps) {
           />
         )}
       </button>
+      {!startLoaded && !historyComplete && (
+        <div
+          data-testid="subagent-loading-earlier"
+          className="pl-6 text-xs text-muted"
+        >
+          {t(I18nKey.SUBAGENTS$LOADING_EARLIER)}
+        </div>
+      )}
       {expanded && (
         <ul id={contentId} className="mt-1 flex flex-col gap-1">
           {sessionIds.map((sessionId) => (
