@@ -1261,6 +1261,37 @@ describe("setup command", () => {
             .toBe(true);
         },
       );
+
+      it.skipIf(process.platform === "win32")(
+        "a background child that left the command's process group holds the phase at most 1 s past the SIGKILL",
+        async () => {
+          const command = node(
+            'const child = require("node:child_process").spawn("sleep", ["300"], { detached: true, stdio: "inherit" }); child.unref(); console.log(process.pid, child.pid);',
+          );
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, leader, child] = await printed(/^(\d+) (\d+)$/);
+          try {
+            await reaped(Number(leader));
+            vi.advanceTimersByTime(200);
+            vi.advanceTimersByTime(3_000);
+            vi.advanceTimersByTime(1_000);
+
+            expect(
+              await Promise.race([
+                stopped,
+                delay(5_000).then(() => "still pending"),
+              ]),
+            ).toMatchObject({
+              message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+              reason: "timeout",
+            });
+          } finally {
+            if (!hasExited(Number(child)))
+              process.kill(Number(child), "SIGKILL");
+          }
+        },
+      );
     });
   });
 });

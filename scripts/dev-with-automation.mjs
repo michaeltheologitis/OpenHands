@@ -1202,6 +1202,19 @@ export const SETUP_COMMAND_TIMEOUT_MS = 15 * 60_000;
 // How long a process tree sent SIGTERM gets before SIGKILL.
 const FORCE_STOP_DELAY_MS = 3000;
 
+// How long the setup command's output may stay open after its SIGKILL, at its
+// timeout or on a quit, before the launcher stops waiting for it. A child no
+// signal reaches (one that left its process group, or on Windows any child once
+// the command has exited) can hold it open for good; 3 s plus this stays well
+// inside the desktop app's 6 s quit safety net.
+const OUTPUT_CLOSE_WAIT_MS = 1000;
+
+/** Stop tracking a service whose output is still open after its SIGKILL. */
+function abandonService(name) {
+  logService(name, "Output still open after SIGKILL; not waiting", c.dim);
+  processes.delete(name);
+}
+
 /**
  * A setup command that did not exit 0. main() throws it; the desktop app shows
  * its message without the ports hint (it checks `error.name`, so it needs no
@@ -1302,9 +1315,10 @@ function setupFailureMessage({
  * }} options  timeoutMs defaults to SETUP_COMMAND_TIMEOUT_MS; on expiry the
  *   command's process group gets SIGTERM, SIGKILL 3 s later if still running,
  *   whether or not the command itself has exited, and the promise rejects once
- *   its output has closed. A quit stops it the same way, with the other
- *   services (stopServices); the promise then settles neither way, so main()
- *   starts nothing after the phase while the launcher exits.
+ *   its output has closed, or OUTPUT_CLOSE_WAIT_MS (1 s) after the SIGKILL if a
+ *   child no signal reaches still holds it. A quit stops it the same way, with
+ *   the other services (stopServices); the promise then settles neither way, so
+ *   main() starts nothing after the phase while the launcher exits.
  * @returns {Promise<{ durationMs: number }>}
  * @throws {SetupCommandError} on a non-zero exit, a signal, a spawn error or the timeout
  */
@@ -1328,6 +1342,7 @@ export async function runSetupCommand({
   const outcome = await new Promise((settle) => {
     let timedOut = false;
     let forceStop = null;
+    let giveUp = null;
     // Until "close", something still holds the command's output: a child it
     // left in the background can outlive it in its process group.
     const stop = (signal) =>
@@ -1335,11 +1350,24 @@ export async function runSetupCommand({
     const timeout = setTimeout(() => {
       timedOut = true;
       stop("SIGTERM");
-      forceStop = setTimeout(() => stop("SIGKILL"), FORCE_STOP_DELAY_MS);
+      forceStop = setTimeout(() => {
+        stop("SIGKILL");
+        giveUp = setTimeout(() => {
+          // Once a quit has begun, stopServices() owns this service.
+          if (shuttingDown) return;
+          abandonService(name);
+          finish({
+            reason: "timeout",
+            exitCode: proc.exitCode,
+            signal: proc.signalCode,
+          });
+        }, OUTPUT_CLOSE_WAIT_MS);
+      }, FORCE_STOP_DELAY_MS);
     }, timeoutMs);
     const finish = (result) => {
       clearTimeout(timeout);
       clearTimeout(forceStop);
+      clearTimeout(giveUp);
       if (!shuttingDown) settle(result);
     };
     proc.once("error", (spawnError) => {
@@ -1391,13 +1419,6 @@ function signalService({ proc, untilOutputCloses }, signal) {
   signalProcessTree(proc, signal, { evenIfLeaderExited: untilOutputCloses });
 }
 
-// How long stopServices() waits, after SIGKILL, for the output of a service
-// that runs until its output closes. A child no signal reaches (one that left
-// its process group, or on Windows any child once the command has exited) can
-// hold it open for good; 3 s plus this stays well inside the desktop app's 6 s
-// quit safety net.
-const OUTPUT_CLOSE_WAIT_MS = 1000;
-
 /**
  * Stop every service this launcher is running: SIGTERM to each process tree,
  * SIGKILL to any still running 3 s later. Resolves once all have ended; does
@@ -1437,10 +1458,7 @@ async function stopServices() {
   clearTimeout(forceStop);
   clearTimeout(giveUp);
   for (const [name, service] of running) {
-    if (isServiceRunning(service)) {
-      logService(name, "Output still open after SIGKILL; not waiting", c.dim);
-      processes.delete(name);
-    }
+    if (isServiceRunning(service)) abandonService(name);
   }
 }
 
