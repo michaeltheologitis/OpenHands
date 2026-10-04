@@ -16,7 +16,7 @@ import {
   getActionSummaryTitle,
   type EventTitleDescriptor,
 } from "#/components/conversation-events/chat/event-content-helpers/get-action-event-title";
-import { toolCallKey } from "#/utils/subagents/subagent-index";
+import { toolCallKey } from "#/utils/subagents/subagent-keys";
 import { MonoComponent } from "./mono-component";
 import { PathComponent } from "./path-component";
 

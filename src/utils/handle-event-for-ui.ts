@@ -5,7 +5,7 @@ import {
   isStreamingDeltaEvent,
 } from "#/types/agent-server/type-guards";
 import { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
-import { toSessionRef } from "#/utils/subagents/subagent-index";
+import { toSessionRef } from "#/utils/subagents/subagent-keys";
 import type {
   DeltaFrame,
   ItemStartedFrame,

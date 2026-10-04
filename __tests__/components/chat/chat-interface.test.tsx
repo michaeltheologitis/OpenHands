@@ -43,7 +43,7 @@ import { useConversationStore } from "#/stores/conversation-store";
 import { useGoalStore } from "#/stores/goal-store";
 import { act } from "@testing-library/react";
 import EventService from "#/api/event-service/event-service.api";
-import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-index";
+import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-keys";
 import { at, call, child, text } from "../../helpers/subagent-events";
 
 const mockSend = vi.fn();

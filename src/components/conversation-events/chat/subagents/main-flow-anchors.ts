@@ -1,8 +1,6 @@
 import type { OpenHandsEvent } from "#/types/agent-server/core";
-import {
-  compareTimestamps,
-  type SubagentAnchor,
-} from "#/utils/subagents/subagent-index";
+import type { SubagentAnchor } from "#/utils/subagents/subagent-index";
+import { compareTimestamps } from "#/utils/subagents/subagent-keys";
 import type { RenderedItem } from "../group-events";
 
 export type MainFlowItem =

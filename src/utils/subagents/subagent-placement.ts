@@ -1,17 +1,19 @@
 import { replaceEqualDeep } from "@tanstack/react-query";
+import type {
+  PendingSubagent,
+  SubagentAnchor,
+  SubagentPlacement,
+  SubagentRecord,
+  SubagentRecords,
+} from "./subagent-index";
 import {
   compareTimestamps,
   ROOT_SESSION,
   routeKey,
   toSessionRef,
   toolCallKey,
-  type PendingSubagent,
   type SessionRef,
-  type SubagentAnchor,
-  type SubagentPlacement,
-  type SubagentRecord,
-  type SubagentRecords,
-} from "./subagent-index";
+} from "./subagent-keys";
 import { summarizeSubagents } from "./subagent-status";
 
 export interface PlacementResult {

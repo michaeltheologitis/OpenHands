@@ -14,7 +14,7 @@ import { useModelStore } from "#/stores/model-store";
 import { ModelMessages } from "#/components/features/chat/model-messages";
 import { useOptionalConversationId } from "#/hooks/use-conversation-id";
 import { ConversationConfirmationButtons } from "#/components/shared/buttons/conversation-confirmation-buttons";
-import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-index";
+import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-keys";
 import {
   anchorsForParent,
   NO_SUBAGENT_ANCHORS,

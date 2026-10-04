@@ -1,5 +1,5 @@
 import type { ACPToolCallEvent } from "#/types/agent-server/core/events/acp-tool-call-event";
-import { toolCallKey } from "#/utils/subagents/subagent-index";
+import { toolCallKey } from "#/utils/subagents/subagent-keys";
 import { GenericEventMessageWrapper } from "../event-message-components/generic-event-message-wrapper";
 import { SubagentBlock } from "./subagent-block";
 

@@ -8,11 +8,8 @@ import {
   SecurityRisk,
 } from "#/types/agent-server/core";
 import { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
-import {
-  EMPTY_SUBAGENT_INDEX,
-  ROOT_SESSION,
-  toolCallKey,
-} from "#/utils/subagents/subagent-index";
+import { EMPTY_SUBAGENT_INDEX } from "#/utils/subagents/subagent-index";
+import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-keys";
 import { call, child } from "../helpers/subagent-events";
 
 const mockUserMessageEvent: MessageEvent = {

@@ -4,11 +4,13 @@ import {
   buildSubagentIndex,
   EMPTY_SUBAGENT_INDEX,
   foldSubagentEvents,
+  type SubagentIndex,
+} from "#/utils/subagents/subagent-index";
+import {
   messageKey,
   ROOT_SESSION,
   toolCallKey,
-  type SubagentIndex,
-} from "#/utils/subagents/subagent-index";
+} from "#/utils/subagents/subagent-keys";
 import {
   anchorsForParent,
   unplacedGroups,

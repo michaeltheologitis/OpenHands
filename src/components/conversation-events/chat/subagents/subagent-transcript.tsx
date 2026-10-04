@@ -3,13 +3,15 @@ import { useTranslation } from "react-i18next";
 import { I18nKey } from "#/i18n/declaration";
 import type { ACPSessionTextEvent } from "#/types/agent-server/core/events/acp-subagent-event";
 import { MarkdownRenderer } from "#/components/features/markdown/markdown-renderer";
+import type {
+  SubagentAnchor,
+  TranscriptItem,
+} from "#/utils/subagents/subagent-index";
 import {
   compareTimestamps,
   routeKey,
   toSessionRef,
-  type SubagentAnchor,
-  type TranscriptItem,
-} from "#/utils/subagents/subagent-index";
+} from "#/utils/subagents/subagent-keys";
 import {
   anchorsForParent,
   NO_SUBAGENT_ANCHORS,

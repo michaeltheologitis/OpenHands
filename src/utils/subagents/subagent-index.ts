@@ -12,50 +12,16 @@ import {
   isACPSubagentEvent,
   isACPToolCallEvent,
 } from "#/types/agent-server/type-guards";
+import {
+  compareTimestamps,
+  messageKey,
+  ROOT_SESSION,
+  routeKey,
+  toSessionRef,
+  toolCallKey,
+  type SessionRef,
+} from "./subagent-keys";
 import { placeSubagents } from "./subagent-placement";
-
-/** The root session in every key below. S1 stores the root as null. */
-export const ROOT_SESSION = "";
-
-/** A child's ACP session id, or `ROOT_SESSION`. */
-export type SessionRef = string;
-
-// No ACP id contains a NUL, so joined keys never collide across sessions.
-const KEY_SEPARATOR = "\u0000";
-
-/** ISO timestamps in one format order as strings; never by locale. */
-export const compareTimestamps = (a: string, b: string): number => {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-};
-
-export function toSessionRef(sessionId: string | null | undefined): SessionRef {
-  return sessionId ?? ROOT_SESSION;
-}
-
-/** ACP tool-call ids are unique only within a session, so keys pair them. */
-export function toolCallKey(
-  sessionId: string | null | undefined,
-  toolCallId: string,
-): string {
-  return toSessionRef(sessionId) + KEY_SEPARATOR + toolCallId;
-}
-
-/** ACP message ids are unique only within a transcript. */
-export function messageKey(
-  transcriptSessionId: string | null | undefined,
-  messageId: string,
-): string {
-  return toSessionRef(transcriptSessionId) + KEY_SEPARATOR + messageId;
-}
-
-/** The first message a transcript addressed to a recipient: its task. */
-export function routeKey(
-  transcriptSessionId: string | null | undefined,
-  recipientSessionId: string,
-): string {
-  return toSessionRef(transcriptSessionId) + KEY_SEPARATOR + recipientSessionId;
-}
 
 export interface SubagentRecord {
   /** The newest snapshot in log order, whatever its source. */
@@ -243,7 +209,7 @@ const placementFieldsOf = ({
   lastConfirmed,
   firstAt,
 }: SubagentRecord) =>
-  [
+  JSON.stringify([
     firstAt,
     latest.parent_session_id,
     latest.parent_tool_call_id,
@@ -253,7 +219,7 @@ const placementFieldsOf = ({
     latest.source,
     lastConfirmed?.state,
     lastConfirmed?.stop_reason,
-  ].join(KEY_SEPARATOR);
+  ]);
 
 /**
  * The transcript's array, copied once per fold before it is changed, and
