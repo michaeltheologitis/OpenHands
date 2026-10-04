@@ -1,5 +1,3 @@
-import React from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -16,7 +14,6 @@ import {
 } from "#/api/backend-registry/active-store";
 import AgentServerConversationService from "#/api/conversation-service/agent-server-conversation-service.api";
 import SettingsService from "#/api/settings-service/settings-service.api";
-import { ActiveBackendProvider } from "#/contexts/active-backend-context";
 import {
   NO_AGENT_CONTROLS,
   useHomeAgentControls,
@@ -24,6 +21,7 @@ import {
 } from "#/hooks/chat/use-agent-controls";
 import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
 import type { Settings } from "#/types/settings";
+import { createQueryWrapper } from "../../helpers/query-wrapper";
 
 vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
   ...(await importOriginal<
@@ -95,17 +93,6 @@ function previewOf(values: ACPConfigOptionValues): ACPSessionControls {
 const httpError = (status: number, detail?: string) =>
   new HttpError(status, "", detail ? { detail } : null);
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  const [client] = React.useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  );
-  return (
-    <QueryClientProvider client={client}>
-      <ActiveBackendProvider>{children}</ActiveBackendProvider>
-    </QueryClientProvider>
-  );
-}
-
 function renderHome(
   launch: HomeLaunchContext = {
     workingDir: "/repo",
@@ -113,7 +100,7 @@ function renderHome(
   },
 ) {
   return renderHook(({ context }) => useHomeAgentControls(context), {
-    wrapper,
+    wrapper: createQueryWrapper(),
     initialProps: { context: launch },
   });
 }
@@ -200,30 +187,19 @@ describe("useHomeAgentControls", () => {
   });
 
   it("asks the agent again when the home screen returns", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    function sharedClient({ children }: { children: React.ReactNode }) {
-      return (
-        <QueryClientProvider client={client}>
-          <ActiveBackendProvider>{children}</ActiveBackendProvider>
-        </QueryClientProvider>
-      );
-    }
+    const wrapper = createQueryWrapper();
     const context: HomeLaunchContext = {
       workingDir: "/repo",
       workspaceMode: "local_repo",
     };
-    const first = renderHook(() => useHomeAgentControls(context), {
-      wrapper: sharedClient,
-    });
+    const first = renderHook(() => useHomeAgentControls(context), { wrapper });
     await waitFor(() =>
       expect(commandsOf(first.result.current)).toEqual(["summarize"]),
     );
     first.unmount();
     await settle();
 
-    renderHook(() => useHomeAgentControls(context), { wrapper: sharedClient });
+    renderHook(() => useHomeAgentControls(context), { wrapper });
 
     await waitFor(() => expect(preview()).toHaveBeenCalledTimes(2));
   });

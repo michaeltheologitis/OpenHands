@@ -1,5 +1,3 @@
-import React from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,7 +12,6 @@ import {
 } from "#/api/backend-registry/active-store";
 import AgentServerConversationService from "#/api/conversation-service/agent-server-conversation-service.api";
 import EventService from "#/api/event-service/event-service.api";
-import { ActiveBackendProvider } from "#/contexts/active-backend-context";
 import {
   NO_AGENT_CONTROLS,
   useConversationAgentControls,
@@ -25,6 +22,7 @@ import {
   BACKEND_REQUEST_TIMEOUT_MESSAGE,
   CORS_OR_NETWORK_ERROR_MESSAGE,
 } from "#/utils/user-facing-error";
+import { createQueryWrapper } from "../../helpers/query-wrapper";
 
 vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
   ...(await importOriginal<
@@ -108,19 +106,10 @@ const lostConnection = new Error("Request failed: Failed to fetch", {
   cause: new TypeError("Failed to fetch"),
 });
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  const [client] = React.useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  );
-  return (
-    <QueryClientProvider client={client}>
-      <ActiveBackendProvider>{children}</ActiveBackendProvider>
-    </QueryClientProvider>
-  );
-}
-
 const renderControls = () =>
-  renderHook(() => useConversationAgentControls("conv-1"), { wrapper });
+  renderHook(() => useConversationAgentControls("conv-1"), {
+    wrapper: createQueryWrapper(),
+  });
 
 describe("useConversationAgentControls", () => {
   beforeEach(() => {

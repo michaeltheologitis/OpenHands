@@ -1,11 +1,10 @@
-import React from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ACPSessionControlsEvent } from "@openhands/typescript-client";
 import EventService from "#/api/event-service/event-service.api";
 import { useLatestAcpSessionControls } from "#/hooks/query/use-latest-acp-session-controls";
 import { useEventStore } from "#/stores/use-event-store";
+import { createQueryWrapper } from "../../helpers/query-wrapper";
 
 const CONVERSATION_ID = "conv-controls";
 
@@ -24,12 +23,10 @@ function controlsEvent(
   };
 }
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  const [client] = React.useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  );
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-}
+const renderLatest = (conversationId = CONVERSATION_ID) =>
+  renderHook(() => useLatestAcpSessionControls(conversationId, true), {
+    wrapper: createQueryWrapper(),
+  });
 
 function seedLiveEvents(...events: ACPSessionControlsEvent[]) {
   useEventStore.setState({
@@ -57,9 +54,7 @@ describe("useLatestAcpSessionControls", () => {
   it("searches the conversation's newest controls event by its module-qualified kind", async () => {
     const search = answerSearchWith(null);
 
-    renderHook(() => useLatestAcpSessionControls(CONVERSATION_ID, true), {
-      wrapper,
-    });
+    renderLatest();
 
     await waitFor(() =>
       expect(search).toHaveBeenCalledWith(CONVERSATION_ID, null, null, {
@@ -87,10 +82,7 @@ describe("useLatestAcpSessionControls", () => {
     seedLiveEvents(controlsEvent("live", "2026-10-01T11:00:00Z", ["live"]));
     answerSearchWith(controlsEvent("searched", searchedAt, ["searched"]));
 
-    const { result } = renderHook(
-      () => useLatestAcpSessionControls(CONVERSATION_ID, true),
-      { wrapper },
-    );
+    const { result } = renderLatest();
 
     await waitFor(() => expect(EventService.searchEvents).toHaveBeenCalled());
     await waitFor(() => expect(result.current?.id).toBe(expectedId));
@@ -103,10 +95,7 @@ describe("useLatestAcpSessionControls", () => {
     );
     answerSearchWith(null);
 
-    const { result } = renderHook(
-      () => useLatestAcpSessionControls(CONVERSATION_ID, true),
-      { wrapper },
-    );
+    const { result } = renderLatest();
 
     await waitFor(() => expect(result.current?.id).toBe("second"));
   });
@@ -114,10 +103,7 @@ describe("useLatestAcpSessionControls", () => {
   it("is null when the conversation has no controls event", async () => {
     const search = answerSearchWith(null);
 
-    const { result } = renderHook(
-      () => useLatestAcpSessionControls(CONVERSATION_ID, true),
-      { wrapper },
-    );
+    const { result } = renderLatest();
 
     await waitFor(() => expect(search).toHaveBeenCalled());
     expect(result.current).toBeNull();
@@ -127,10 +113,7 @@ describe("useLatestAcpSessionControls", () => {
     seedLiveEvents(controlsEvent("live", "2026-10-01T11:00:00Z", ["live"]));
     answerSearchWith(null);
 
-    const { result } = renderHook(
-      () => useLatestAcpSessionControls("another-conversation", true),
-      { wrapper },
-    );
+    const { result } = renderLatest("another-conversation");
 
     await waitFor(() => expect(EventService.searchEvents).toHaveBeenCalled());
     expect(result.current).toBeNull();

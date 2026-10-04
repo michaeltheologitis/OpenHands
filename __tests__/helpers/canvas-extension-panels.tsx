@@ -1,5 +1,4 @@
 import React from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { vi } from "vitest";
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
@@ -12,7 +11,6 @@ import {
   CanvasExtensionsRuntimeProvider,
   type RegisteredCanvasExtensionPanel,
 } from "#/components/features/canvas-extensions/canvas-extensions-runtime";
-import { ActiveBackendProvider } from "#/contexts/active-backend-context";
 import { toConversationAppPanelKey } from "#/stores/conversation-store";
 import type {
   CanvasExtensionManifest,
@@ -21,6 +19,7 @@ import type {
   InstalledCanvasExtensionInfo,
 } from "#/types/canvas-extension";
 import demoPanelManifest from "#/fixtures/canvas-extensions/demo-panel/canvas-extension.json";
+import { createQueryWrapper } from "./query-wrapper";
 
 export const PANELS_BACKEND: Backend = {
   id: "panels-backend",
@@ -96,19 +95,15 @@ export function PanelAppsRuntime({
   children,
   moduleLoader = loadDemoPanelModule,
 }: PanelAppsRuntimeProps) {
-  const [queryClient] = React.useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  );
+  const [QueryWrapper] = React.useState(createQueryWrapper);
   return (
-    <QueryClientProvider client={queryClient}>
-      <ActiveBackendProvider>
-        <MemoryRouter>
-          <CanvasExtensionsRuntimeProvider moduleLoader={moduleLoader}>
-            {children}
-          </CanvasExtensionsRuntimeProvider>
-        </MemoryRouter>
-      </ActiveBackendProvider>
-    </QueryClientProvider>
+    <QueryWrapper>
+      <MemoryRouter>
+        <CanvasExtensionsRuntimeProvider moduleLoader={moduleLoader}>
+          {children}
+        </CanvasExtensionsRuntimeProvider>
+      </MemoryRouter>
+    </QueryWrapper>
   );
 }
 
