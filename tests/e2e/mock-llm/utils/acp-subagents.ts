@@ -303,7 +303,7 @@ export interface FanoutTranscriptOptions {
 
 const ROOT_SESSION_ID = "fanout-root";
 const FANOUT_CELL = "fanout-cell";
-const FANOUT_CHILD_COST = 0.0003;
+const FANOUT_STEP_COST = 0.0001;
 
 const update = (sessionId: string, body: Record<string, unknown>) => ({
   jsonrpc: "2.0",
@@ -314,7 +314,8 @@ const update = (sessionId: string, body: Record<string, unknown>) => ({
 /**
  * Write an agent-outgoing JSONL transcript (S1 §4.10's format) of one root
  * cell fanning out to `children` sub-agents with `cellsPerChild` cells each,
- * interleaved as concurrent children are; returns the file's path.
+ * each cell a thought, a call and a cost report, interleaved as concurrent
+ * children are; returns the file's path.
  */
 export async function writeFanoutTranscript(
   directory: string,
@@ -364,6 +365,10 @@ export async function writeFanoutTranscript(
       const toolCallId = `${id}-c${cell}`;
       lines.push(
         update(id, {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: `Planning step ${cell} of ${id}.` },
+        }),
+        update(id, {
           sessionUpdate: "tool_call",
           toolCallId,
           title: `Run step ${cell} of ${id}`,
@@ -376,17 +381,17 @@ export async function writeFanoutTranscript(
           status: "completed",
           rawOutput: `step ${cell} done`,
         }),
+        update(id, {
+          sessionUpdate: "usage_update",
+          used: 10 * cell,
+          size: 1000,
+          cost: { amount: FANOUT_STEP_COST * cell, currency: "USD" },
+        }),
       );
     }
   }
   for (const id of ids) {
     lines.push(
-      update(id, {
-        sessionUpdate: "usage_update",
-        used: 10,
-        size: 1000,
-        cost: { amount: FANOUT_CHILD_COST, currency: "USD" },
-      }),
       update(id, {
         sessionUpdate: "session_message",
         messageId: `${id}-answer`,
