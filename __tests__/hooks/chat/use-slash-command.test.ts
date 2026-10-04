@@ -14,6 +14,7 @@ import {
 } from "#/api/backend-registry/active-store";
 import type { Backend } from "#/api/backend-registry/types";
 import { useFreeModelsStore } from "#/stores/free-models-store";
+import { BUILT_IN_COMMANDS, PLAN_COMMAND } from "#/utils/constants";
 
 const mockSkills = vi.hoisted(() => ({
   data: undefined as unknown[] | undefined,
@@ -902,23 +903,15 @@ describe("useSlashCommand", () => {
         { name: "summarize", description: "A second summarize" },
       ]);
 
-      const commands = result.current.filteredItems.map((item) => item.command);
-      expect(commands.filter((command) => command === "/plan")).toHaveLength(1);
-      expect(
-        result.current.filteredItems.filter(
-          (item) => item.command === "/summarize",
-        ),
-      ).toEqual([
-        expect.objectContaining({
-          skill: expect.objectContaining({
-            description: "Summarize the input",
-          }),
-        }),
+      const descriptionsOf = (command: string) =>
+        result.current.filteredItems
+          .filter((item) => item.command === command)
+          .map((item) => item.skill.description);
+      expect(descriptionsOf(PLAN_COMMAND)).toEqual([
+        BUILT_IN_COMMANDS.find((item) => item.command === PLAN_COMMAND)!.skill
+          .description,
       ]);
-      expect(
-        result.current.filteredItems.find((item) => item.command === "/plan")
-          ?.skill.description,
-      ).not.toBe("The agent's plan");
+      expect(descriptionsOf("/summarize")).toEqual(["Summarize the input"]);
     });
 
     it("replaces the agent's commands with each new report", () => {

@@ -402,9 +402,7 @@ describe("useHomeAgentControls", () => {
     await waitFor(() =>
       expect(AgentProfilesService.listProfiles).toHaveBeenCalled(),
     );
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
+    await settle();
 
     expect(result.current).toBe(NO_AGENT_CONTROLS);
     expect(preview()).not.toHaveBeenCalled();
