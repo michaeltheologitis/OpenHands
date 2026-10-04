@@ -13,6 +13,11 @@ import { handleEventForUI } from "#/utils/handle-event-for-ui";
 import { OpenHandsEvent } from "#/types/agent-server/core";
 import OpenHandsLogo from "#/assets/branding/openhands-logo.svg?react";
 import { useInfiniteScroll } from "#/hooks/use-infinite-scroll";
+import {
+  SubagentHistoryContext,
+  SubagentSourceContext,
+  useStaticSubagentSource,
+} from "#/components/conversation-events/chat/subagents/subagent-source";
 
 /**
  * Resolve the creator's email through the active cloud org, following the
@@ -65,6 +70,9 @@ export default function SharedConversation() {
         .filter(shouldRenderEvent),
     [conversationEvents],
   );
+
+  // Sub-agents nest from this view's own events, read-only: no Stop.
+  const subagentSource = useStaticSubagentSource(conversationEvents);
 
   // Set up infinite scroll to load more events when user scrolls to bottom
   const scrollContainerRef = useInfiniteScroll({
@@ -149,10 +157,14 @@ export default function SharedConversation() {
       >
         <div className="max-w-4xl mx-auto p-4 border border-border-subtle rounded">
           {renderableEvents.length > 0 ? (
-            <Messages
-              messages={renderableEvents}
-              allEvents={conversationEvents}
-            />
+            <SubagentSourceContext.Provider value={subagentSource}>
+              <SubagentHistoryContext.Provider value={!hasNextPage}>
+                <Messages
+                  messages={renderableEvents}
+                  allEvents={conversationEvents}
+                />
+              </SubagentHistoryContext.Provider>
+            </SubagentSourceContext.Provider>
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-muted py-8">

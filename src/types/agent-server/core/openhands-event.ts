@@ -1,5 +1,8 @@
 // Import all event types
 import {
+  ACPSessionMessageEvent,
+  ACPSessionTextEvent,
+  ACPSubagentEvent,
   ACPToolCallEvent,
   ActionEvent,
   MessageEvent,
@@ -33,6 +36,10 @@ export type OpenHandsEvent =
   | SystemPromptEvent
   // ACP sub-agent tool call events
   | ACPToolCallEvent
+  // ACP sub-agent sessions: associations, directed messages, a child's text
+  | ACPSubagentEvent
+  | ACPSessionMessageEvent
+  | ACPSessionTextEvent
   // Hook events
   | HookExecutionEvent
   // Conversation management events
