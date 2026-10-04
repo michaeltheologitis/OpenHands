@@ -72,6 +72,26 @@ describe("foldSubagentEvents", () => {
     expect(index.placement.byCell.get(toolCallKey("n2", "c1"))).toEqual(["n5"]);
   });
 
+  // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
+  it.each([
+    ["names a spawning call", undefined],
+    ["names another spawning call", "c1"],
+  ])("re-places a child whose later snapshot %s", (_change, firstCell) => {
+    const announced = fold(
+      call(1, "c1"),
+      call(2, "c2"),
+      child(3, "n2", { cell: firstCell }),
+    );
+
+    const index = foldSubagentEvents(announced, [
+      child(4, "n2", { cell: "c2" }),
+    ]);
+
+    expect(index.placement.byCell.get(rootCell("c2"))).toEqual(["n2"]);
+    expect(index.placement.byCell.has(rootCell("c1"))).toBe(false);
+    expect(index.placement.byAnchor.size).toBe(0);
+  });
+
   it("orders a cell's children by announcement when an older page brings an earlier one", () => {
     const newestPage = fold(call(1, "c1"), child(5, "n3", { cell: "c1" }));
 
