@@ -14,9 +14,9 @@ import { ConversationAppPanelTabsMenu } from "./conversation-app-panel-tabs-menu
 export interface ConversationAppPanelProps {
   conversationId: string;
   panel: RegisteredCanvasExtensionPanel;
-  /** "compact" in the narrow-window page's top bar. */
+  /** "compact" fits a page's top bar. */
   variant?: "default" | "compact";
-  /** Rendered before the tab row, e.g. the narrow-window page's back button. */
+  /** Rendered before the tab row, such as a back button. */
   leading?: React.ReactNode;
 }
 

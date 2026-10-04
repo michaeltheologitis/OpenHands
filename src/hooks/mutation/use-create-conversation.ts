@@ -50,7 +50,7 @@ export interface CreateConversationVariables {
   // active AgentProfile (if any) is used so home-composed conversations
   // launch from the user's selected profile (#3727).
   agentProfileId?: string;
-  /** Values the home screen's picker accepted; sent as acp_config_options. */
+  /** ACP config option values to start with; sent as acp_config_options. */
   acpConfigOptions?: ACPConfigOptionValues;
   entryPoint?: string; // analytics only; not forwarded to the service
 }

@@ -70,7 +70,7 @@ export function useAcpSessionPreview(
   context: HomeLaunchContext,
   values: ACPConfigOptionValues,
 ): UseQueryResult<AcpSessionPreview, Error> {
-  // The start sends a workspace mode only with a workspace (HomeChatLauncher).
+  // A start sends a workspace mode only with a workspace.
   const workspaceMode = context.workingDir ? context.workspaceMode : undefined;
   const [mountedAt] = React.useState(Date.now);
   // The launch key names the profile; its kind follows from it.

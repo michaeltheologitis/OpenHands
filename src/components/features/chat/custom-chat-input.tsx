@@ -28,7 +28,7 @@ export interface CustomChatInputProps {
   ) => void;
   className?: React.HTMLAttributes<HTMLDivElement>["className"];
   buttonClassName?: React.HTMLAttributes<HTMLButtonElement>["className"];
-  /** The agent's slash commands and option pickers, from the composer's owner. */
+  /** The agent's slash commands and options; none when omitted. */
   agentControls?: AgentControls;
 }
 

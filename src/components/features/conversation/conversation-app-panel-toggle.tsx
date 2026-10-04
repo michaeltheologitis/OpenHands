@@ -81,7 +81,7 @@ export function ConversationAppPanelToggle({
   );
 }
 
-/** One button per registered App panel, after Show panel in the header. */
+/** One button per registered App panel, in panel order. */
 export function ConversationAppPanelToggles() {
   const { conversationId } = useOptionalConversationId();
   const { panels } = useCanvasExtensionsRuntime();

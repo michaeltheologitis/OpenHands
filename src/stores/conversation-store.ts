@@ -418,8 +418,8 @@ export const useConversationStore = create<ConversationStore>()(
       setPlanContent: (planContent) =>
         set({ planContent }, false, "setPlanContent"),
 
-      // `hasRightPanelToggled` is cleared too: `useChatInputLogic` re-applies
-      // it to `isRightPanelShown` on mount and would reopen the drawer.
+      // `hasRightPanelToggled` is the drawer state a conversation restores,
+      // so it is cleared too; restoring it would reopen the drawer.
       openAppPanel: (activeAppPanel) =>
         set(
           {
