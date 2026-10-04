@@ -13,6 +13,7 @@ import { renderWithProviders } from "../../../../test-utils";
 import {
   DEMO_PANEL_KEY,
   PanelAppsRuntime,
+  demoPageShows,
   demoPanelLifecycle,
   installPanelApps,
   resetDemoPanelLifecycle,
@@ -76,11 +77,7 @@ describe("ConversationAppPanel", () => {
     renderPanel("conv-1");
 
     expect(await panelContent()).toHaveAttribute("data-tab-id", "overview");
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "conversation=conv-1 path= tab=overview",
-      ),
-    );
+    await demoPageShows("conversation=conv-1 path= tab=overview");
   });
 
   it("disposes the old tab's mount before mounting the newly selected one", async () => {
@@ -118,19 +115,11 @@ describe("ConversationAppPanel", () => {
   // @spec CX-002 — A panel tab is mounted for the conversation it is shown in
   it("remounts the tab with the new conversation's id when the conversation changes", async () => {
     const { switchConversation } = renderPanel("conv-1");
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "conversation=conv-1",
-      ),
-    );
+    await demoPageShows("conversation=conv-1");
 
     switchConversation("conv-2");
 
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "conversation=conv-2 path= tab=overview",
-      ),
-    );
+    await demoPageShows("conversation=conv-2 path= tab=overview");
     expect(demoPanelLifecycle()).toEqual({ mounted: 2, disposed: 1 });
   });
 
@@ -155,11 +144,7 @@ describe("ConversationAppPanel", () => {
     await user.click(
       screen.getByTestId("conversation-app-panel-menu-open-details"),
     );
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "tab=details",
-      ),
-    );
+    await demoPageShows("tab=details");
     await user.click(screen.getByTestId("conversation-app-panel-menu-button"));
     await user.click(
       screen.getByTestId("conversation-app-panel-menu-pin-overview"),
@@ -209,11 +194,7 @@ describe("ConversationAppPanel", () => {
 
     await user.click(await screen.findByTestId("demo-panel-select-details"));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "tab=details",
-      ),
-    );
+    await demoPageShows("tab=details");
     expect(await panelContent()).toHaveAttribute("data-tab-id", "details");
   });
 });

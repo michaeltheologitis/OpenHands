@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
@@ -8,7 +8,10 @@ import {
 } from "#/api/backend-registry/active-store";
 import { ConversationAppPanelToggles } from "#/components/features/conversation/conversation-app-panel-toggle";
 import { useConversationStore } from "#/stores/conversation-store";
-import type { InstalledCanvasExtensionInfo } from "#/types/canvas-extension";
+import type {
+  CanvasExtensionModule,
+  InstalledCanvasExtensionInfo,
+} from "#/types/canvas-extension";
 import { renderWithProviders } from "../../../../test-utils";
 import {
   DEMO_PANEL_EXTENSION,
@@ -51,9 +54,15 @@ const withoutIcon: InstalledCanvasExtensionInfo = {
   },
 };
 
-function renderToggles(navigate = vi.fn()) {
+function renderToggles({
+  navigate = vi.fn(),
+  moduleLoader,
+}: {
+  navigate?: () => void;
+  moduleLoader?: () => Promise<CanvasExtensionModule>;
+} = {}) {
   renderWithProviders(
-    <PanelAppsRuntime>
+    <PanelAppsRuntime moduleLoader={moduleLoader}>
       <ConversationAppPanelToggles />
     </PanelAppsRuntime>,
     { navigation: { conversationId: CONVERSATION_ID, navigate } },
@@ -96,12 +105,7 @@ describe("ConversationAppPanelToggles", () => {
   });
 
   it("renders no button for an App whose panel has no registered tab", async () => {
-    renderWithProviders(
-      <PanelAppsRuntime moduleLoader={async () => ({ activate: () => {} })}>
-        <ConversationAppPanelToggles />
-      </PanelAppsRuntime>,
-      { navigation: { conversationId: CONVERSATION_ID } },
-    );
+    renderToggles({ moduleLoader: async () => ({ activate: () => {} }) });
 
     await waitFor(() =>
       expect(CanvasExtensionsService.fetchBundle).toHaveBeenCalled(),
@@ -113,27 +117,18 @@ describe("ConversationAppPanelToggles", () => {
     vi.mocked(CanvasExtensionsService.listInstalled).mockResolvedValue([
       withoutIcon,
     ]);
-    renderWithProviders(
-      <PanelAppsRuntime
-        moduleLoader={async () => ({
-          activate: (host) => {
-            host.registerPage("second-tab", () => undefined);
-            host.registerPage("overview", () => undefined);
-          },
-        })}
-      >
-        <div data-testid="group">
-          <ConversationAppPanelToggles />
-        </div>
-      </PanelAppsRuntime>,
-      { navigation: { conversationId: CONVERSATION_ID } },
-    );
+    renderToggles({
+      moduleLoader: async () => ({
+        activate: (host) => {
+          host.registerPage("second-tab", () => undefined);
+          host.registerPage("overview", () => undefined);
+        },
+      }),
+    });
 
     await waitFor(() =>
       expect(
-        within(screen.getByTestId("group"))
-          .getAllByRole("button")
-          .map((button) => button.dataset.testid),
+        screen.getAllByRole("button").map((button) => button.dataset.testid),
       ).toEqual([TOGGLE, "conversation-app-panel-toggle-demo-panel-second"]),
     );
   });

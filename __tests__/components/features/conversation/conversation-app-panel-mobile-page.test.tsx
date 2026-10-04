@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationAppPanelMobilePage } from "#/components/features/conversation/conversation-main/conversation-app-panel-mobile-page";
@@ -6,6 +6,7 @@ import { useConversationStore } from "#/stores/conversation-store";
 import { renderWithProviders } from "../../../../test-utils";
 import {
   PanelAppsRuntime,
+  demoPageShows,
   installPanelApps,
   uninstallPanelApps,
 } from "../../../helpers/canvas-extension-panels";
@@ -48,11 +49,7 @@ describe("ConversationAppPanelMobilePage", () => {
     expect(
       screen.getByTestId("conversation-app-panel-tab-details"),
     ).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(
-        "conversation=conv-narrow path= tab=overview",
-      ),
-    );
+    await demoPageShows("conversation=conv-narrow path= tab=overview");
     expect(useConversationStore.getState()).toMatchObject({
       activeAppPanel: null,
       isRightPanelShown: false,

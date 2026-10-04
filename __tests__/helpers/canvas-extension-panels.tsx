@@ -1,6 +1,7 @@
 import React from "react";
 import { MemoryRouter } from "react-router";
-import { vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import { expect, vi } from "vitest";
 import CanvasExtensionsService from "#/api/canvas-extensions-service";
 import {
   setActiveSelection,
@@ -57,6 +58,13 @@ export function demoPanelLifecycle(): DemoPanelLifecycle {
 
 export function resetDemoPanelLifecycle() {
   Object.assign(demoPanelLifecycle(), { mounted: 0, disposed: 0 });
+}
+
+/** Waits until the fixture's page reports a mount context containing `text`. */
+export function demoPageShows(text: string) {
+  return waitFor(() =>
+    expect(screen.getByTestId("demo-panel-context")).toHaveTextContent(text),
+  );
 }
 
 const loadDemoPanelModule = () =>
