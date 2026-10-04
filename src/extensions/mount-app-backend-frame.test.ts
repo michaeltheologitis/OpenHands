@@ -109,15 +109,24 @@ describe("mountAppBackendFrame", () => {
     dispose();
   });
 
-  it("removes its frame and releases the session when disposed", async () => {
-    const { container, dispose } = mount();
+  // @spec CX-005 — An App's backend session is revoked only when that App's last frame closes
+  it("removes its frame when disposed, and releases the App's one session when its last frame closes", async () => {
+    const first = mount();
+    const second = mount();
     await vi.waitFor(() =>
-      expect(container.querySelector("iframe")).not.toBeNull(),
+      expect(second.container.querySelector("iframe")).not.toBeNull(),
     );
 
-    dispose();
+    first.dispose();
 
-    expect(container.childElementCount).toBe(0);
+    expect(first.container.childElementCount).toBe(0);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(revokeSession).not.toHaveBeenCalled();
+
+    second.dispose();
     await vi.waitFor(() =>
       expect(revokeSession).toHaveBeenCalledWith("library"),
     );
