@@ -123,7 +123,7 @@ describe("Stop", () => {
   );
 });
 
-// @spec SUB-006 — Each sub-agent shows its latest reported cost; costs are never added
+// @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
 describe("formatSubagentCost", () => {
   it.each([
     [null, "USD", null],

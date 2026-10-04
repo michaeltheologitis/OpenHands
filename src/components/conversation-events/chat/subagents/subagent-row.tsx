@@ -13,6 +13,7 @@ import {
   statusLabel,
   SUBAGENT_TOOL_CALLS_I18N_KEY,
 } from "./subagent-labels";
+import { useShowSubagentCosts } from "./subagent-cost-preference";
 import { useSubagents } from "./subagent-source";
 import { StopSubagentButton } from "./stop-subagent-button";
 import { SubagentTranscript } from "./subagent-transcript";
@@ -24,7 +25,10 @@ export interface SubagentRowProps {
 
 const firstLineOf = (text: string) => text.trim().split("\n", 1)[0];
 
-/** One child: status, title, answer, tool calls, cost, Stop; its transcript. */
+/**
+ * One child: status, title, answer, tool calls, cost (when shown), Stop; its
+ * transcript.
+ */
 export const SubagentRow = React.memo(function SubagentRow({
   sessionId,
   depth,
@@ -36,6 +40,7 @@ export const SubagentRow = React.memo(function SubagentRow({
   const answer = useSubagents((index) =>
     stats?.answerKey ? index.messages.get(stats.answerKey) : undefined,
   );
+  const showCost = useShowSubagentCosts();
 
   if (!record) return null;
 
@@ -45,10 +50,9 @@ export const SubagentRow = React.memo(function SubagentRow({
   const answerText = answer?.latest.text
     ? firstLineOf(answer.latest.text)
     : null;
-  const cost = formatSubagentCost(
-    record.latest.cost,
-    record.latest.cost_currency,
-  );
+  const cost = showCost
+    ? formatSubagentCost(record.latest.cost, record.latest.cost_currency)
+    : null;
   const Chevron = expanded ? ArrowUp : ArrowDown;
 
   return (

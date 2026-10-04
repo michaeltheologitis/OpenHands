@@ -8,6 +8,7 @@ import {
   SubagentSourceContext,
   useStaticSubagentSource,
 } from "#/components/conversation-events/chat/subagents/subagent-source";
+import { writeShowSubagentCosts } from "#/components/conversation-events/chat/subagents/subagent-cost-preference";
 import EventService from "#/api/event-service/event-service.api";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { useEventStore } from "#/stores/use-event-store";
@@ -88,6 +89,7 @@ const expandRow = async (sessionId: string) => {
 describe("sub-agents under the call that spawned them", () => {
   beforeEach(() => {
     useEventStore.getState().clearEvents();
+    window.localStorage.clear();
     vi.restoreAllMocks();
     vi.mocked(displayErrorToast).mockReset();
   });
@@ -142,8 +144,25 @@ describe("sub-agents under the call that spawned them", () => {
     expect(n3Cell).toContainElement(rowOf("n4"));
   });
 
-  // @spec SUB-006 — Each sub-agent shows its latest reported cost; costs are never added
-  it("shows each child's latest cost and never a sum", async () => {
+  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
+  it("hides each child's cost unless costs are shown", async () => {
+    const cell = call(1, "c1");
+    seed(
+      cell,
+      child(2, "n2", { cell: "c1", cost: 0.0004 }),
+      child(3, "n3", { cell: "c1", cost: 0.0002 }),
+    );
+    renderCell(cell);
+
+    await user.click(screen.getByTestId("subagent-block-toggle"));
+
+    expect(screen.getAllByTestId("subagent-row")).toHaveLength(2);
+    expect(screen.queryAllByTestId("subagent-cost")).toHaveLength(0);
+  });
+
+  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
+  it("shows each child's latest cost and never a sum when costs are shown", async () => {
+    writeShowSubagentCosts(true);
     const cell = call(1, "c1");
     seed(
       cell,
