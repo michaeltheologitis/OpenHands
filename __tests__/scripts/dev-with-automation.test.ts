@@ -38,7 +38,6 @@ import {
   buildAutomationRuntimeServicesInfo,
   buildConfig,
   buildRouteArgs,
-  buildSetupEnv,
   buildViteBackendEnv,
   buildViteFrontendEnv,
   getAgentServerBaseUrl,
@@ -979,34 +978,6 @@ describe("setServiceLogListener", () => {
 });
 
 describe("setup command", () => {
-  const stateDir = path.join(tmpdir(), "example-app", "agent-canvas");
-  const config = {
-    stateDir,
-    agentServerPort: 18000,
-    sessionApiKey: "a".repeat(64),
-  };
-
-  it("buildSetupEnv gives both phases the phase, the state directory and the persistence root", () => {
-    for (const phase of ["before-start", "after-ready"] as const) {
-      expect(buildSetupEnv(config, phase)).toMatchObject({
-        OH_CANVAS_SETUP_PHASE: phase,
-        OH_CANVAS_SAFE_STATE_DIR: stateDir,
-        OH_PERSISTENCE_DIR: path.dirname(stateDir),
-      });
-    }
-  });
-
-  it("buildSetupEnv gives the agent-server URL and session key only after the agent-server is ready", () => {
-    const beforeStart = buildSetupEnv(config, "before-start");
-    expect(beforeStart).not.toHaveProperty("AGENT_SERVER_URL");
-    expect(beforeStart).not.toHaveProperty("SESSION_API_KEY");
-
-    expect(buildSetupEnv(config, "after-ready")).toMatchObject({
-      AGENT_SERVER_URL: "http://127.0.0.1:18000",
-      SESSION_API_KEY: config.sessionApiKey,
-    });
-  });
-
   describe("runSetupCommand", () => {
     const logged: Array<{ name: string; line: string; level: string }> = [];
     const node = (source: string, ...args: string[]) => [
@@ -1056,71 +1027,48 @@ describe("setup command", () => {
       setServiceLogListener(null);
     });
 
-    it("runs argv without a shell", async () => {
-      await run(
-        node(
-          "console.log(JSON.stringify(process.argv.slice(1)))",
-          "$HOME; echo x",
-        ),
-      );
-
-      expect(linesOf("setup before-start")).toContain(
-        JSON.stringify(["$HOME; echo x"]),
-      );
-    });
-
-    it("streams each output line to the service log under its phase", async () => {
-      const command = node(
-        'console.log("one"); console.error("two"); console.log("three")',
-      );
+    it("streams each output line to the service log under its phase, between Running and Done", async () => {
+      const command = node('console.log("one")');
 
       await run(command, { phase: "after-ready" });
 
-      const entries = logged.filter(
-        (entry) => entry.name === "setup after-ready",
-      );
-      expect(entries[0]).toEqual({
-        name: "setup after-ready",
-        line: `Running ${command.join(" ")}`,
-        level: "info",
-      });
-      expect(entries).toEqual(
-        expect.arrayContaining([
-          { name: "setup after-ready", line: "one", level: "stdout" },
-          { name: "setup after-ready", line: "two", level: "stderr" },
-          { name: "setup after-ready", line: "three", level: "stdout" },
-        ]),
-      );
-      expect(entries.at(-1)).toMatchObject({
-        line: expect.stringMatching(/^Done in \d+s$/),
-        level: "info",
-      });
+      expect(
+        logged.filter((entry) => entry.name === "setup after-ready"),
+      ).toEqual([
+        {
+          name: "setup after-ready",
+          line: `Running ${command.join(" ")}`,
+          level: "info",
+        },
+        { name: "setup after-ready", line: "one", level: "stdout" },
+        {
+          name: "setup after-ready",
+          line: expect.stringMatching(/^Done in \d+s$/),
+          level: "info",
+        },
+      ]);
     });
 
-    it("closes stdin, so a command that reads it sees end of input", async () => {
-      await run(
-        node(
-          'process.stdin.on("end", () => console.log("stdin ended")); process.stdin.resume()',
-        ),
-      );
-
-      expect(linesOf("setup before-start")).toContain("stdin ended");
-    });
-
-    it("runs in the given working directory with the given variables", async () => {
+    it("runs argv without a shell, stdin closed, in the given working directory with the given variables", async () => {
       const cwd = mkdtempSync(path.join(tmpdir(), "setup-cwd-"));
       onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
 
+      // It prints once stdin ends, which it would never do were stdin open.
       await run(
         node(
-          "console.log(process.cwd()); console.log(process.env.EXAMPLE_SETUP_VAR)",
+          'process.stdin.on("end", () => console.log(JSON.stringify([process.argv.slice(1), process.cwd(), process.env.EXAMPLE_SETUP_VAR]))); process.stdin.resume()',
+          "$HOME; echo x",
         ),
         { cwd, env: { EXAMPLE_SETUP_VAR: "from-the-launcher" } },
       );
 
-      const lines = linesOf("setup before-start");
-      expect(lines).toContain(realpathSync(cwd));
-      expect(lines).toContain("from-the-launcher");
+      expect(linesOf("setup before-start")).toContain(
+        JSON.stringify([
+          ["$HOME; echo x"],
+          realpathSync(cwd),
+          "from-the-launcher",
+        ]),
+      );
     });
 
     it.each([

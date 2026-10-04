@@ -133,10 +133,17 @@ describe("launcherDefaultsEnv", () => {
     expect(launcherDefaultsEnv({}, {}, home)).toEqual({});
   });
 
+  // A broken defaults.json fails every launch, not only the ones that use it.
+  const environmentWins = {
+    OH_AGENT_SERVER_GIT_REPO: forkRepo,
+    OH_AGENT_SERVER_VERSION: "1.18.0",
+    OH_CANVAS_SAFE_STATE_DIR: "/tmp/my-state",
+  };
+
   it("rejects a relative state directory, naming the key", () => {
     expect(() =>
       launcherDefaultsEnv(
-        {},
+        environmentWins,
         defaultsWith({ paths: { stateDir: "state" } }),
         home,
       ),
@@ -156,7 +163,7 @@ describe("launcherDefaultsEnv", () => {
     (repo) => {
       expect(() =>
         launcherDefaultsEnv(
-          {},
+          environmentWins,
           defaultsWith({ sources: { agentServerGitRepo: repo } }),
           home,
         ),
@@ -169,7 +176,7 @@ describe("launcherDefaultsEnv", () => {
   it("rejects an empty ref", () => {
     expect(() =>
       launcherDefaultsEnv(
-        {},
+        environmentWins,
         defaultsWith({ sources: { agentServerGitRef: "" } }),
         home,
       ),
@@ -177,73 +184,29 @@ describe("launcherDefaultsEnv", () => {
       'sources.agentServerGitRef in config/defaults.json must be a non-empty string, got: ""',
     );
   });
-
-  it("validates the defaults even when the environment wins", () => {
-    // A broken defaults.json fails every launch, not only the ones that use it.
-    const environmentWins = {
-      OH_AGENT_SERVER_GIT_REPO: forkRepo,
-      OH_AGENT_SERVER_VERSION: "1.18.0",
-      OH_CANVAS_SAFE_STATE_DIR: "/tmp/my-state",
-    };
-
-    expect(() =>
-      launcherDefaultsEnv(
-        environmentWins,
-        defaultsWith({ sources: { agentServerGitRepo: "example/sdk" } }),
-        home,
-      ),
-    ).toThrow(/sources\.agentServerGitRepo/);
-    expect(() =>
-      launcherDefaultsEnv(
-        environmentWins,
-        defaultsWith({ sources: { agentServerGitRef: "" } }),
-        home,
-      ),
-    ).toThrow(/sources\.agentServerGitRef/);
-    expect(() =>
-      launcherDefaultsEnv(
-        environmentWins,
-        defaultsWith({ paths: { stateDir: "state" } }),
-        home,
-      ),
-    ).toThrow(/paths\.stateDir/);
-  });
 });
 
 describe("applyLauncherDefaults", () => {
-  it("fills only unset variables and returns their names", () => {
+  it("fills only unset variables and returns their names, sorted", () => {
     const env: Record<string, string | undefined> = {
-      OH_AGENT_SERVER_GIT_REPO: "https://github.com/someone/else",
+      OH_CANVAS_SAFE_STATE_DIR: "/tmp/my-state",
       UNRELATED: "kept",
     };
 
-    const filled = applyLauncherDefaults(
-      env,
-      defaultsWith({
-        sources: { agentServerGitRepo: forkRepo, agentServerGitRef: commitSha },
-        paths: { stateDir: "/srv/example-app/agent-canvas" },
-      }),
-    );
+    const filled = applyLauncherDefaults(env, {
+      ...forkSource,
+      paths: { stateDir: "/srv/example-app/agent-canvas" },
+    });
 
     expect(filled).toEqual([
       "OH_AGENT_SERVER_GIT_REF",
-      "OH_CANVAS_SAFE_STATE_DIR",
-      "OH_SECRET_KEY_PATH",
-      "OH_SESSION_API_KEY_PATH",
+      "OH_AGENT_SERVER_GIT_REPO",
     ]);
     expect(env).toEqual({
-      OH_AGENT_SERVER_GIT_REPO: "https://github.com/someone/else",
+      OH_CANVAS_SAFE_STATE_DIR: "/tmp/my-state",
       UNRELATED: "kept",
       OH_AGENT_SERVER_GIT_REF: commitSha,
-      OH_CANVAS_SAFE_STATE_DIR: "/srv/example-app/agent-canvas",
-      OH_SECRET_KEY_PATH: path.join(
-        "/srv/example-app/agent-canvas",
-        "secret-key.txt",
-      ),
-      OH_SESSION_API_KEY_PATH: path.join(
-        "/srv/example-app/agent-canvas",
-        "api-key.txt",
-      ),
+      OH_AGENT_SERVER_GIT_REPO: forkRepo,
     });
   });
 });

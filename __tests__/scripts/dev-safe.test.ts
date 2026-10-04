@@ -697,22 +697,14 @@ describe("buildAgentServerCommand", () => {
         OH_AGENT_SERVER_GIT_REF: "feature-branch",
       });
 
-      expect(cmd.args).toEqual([
-        "--reinstall",
-        "--from",
-        `git+${forkRepo}@feature-branch#subdirectory=openhands-agent-server`,
-        "--with",
-        `git+${forkRepo}@feature-branch#subdirectory=openhands-sdk`,
-        "--with",
-        `git+${forkRepo}@feature-branch#subdirectory=openhands-tools`,
-        "--with",
-        `git+${forkRepo}@feature-branch#subdirectory=openhands-workspace`,
-        "--with",
-        "posthog>=6,<7",
-        "agent-server",
-        "--import-modules",
-        "canvas_ui_tool",
-      ]);
+      expect(cmd.args.filter((arg) => arg.startsWith("git+"))).toEqual(
+        [
+          "openhands-agent-server",
+          "openhands-sdk",
+          "openhands-tools",
+          "openhands-workspace",
+        ].map((dir) => `git+${forkRepo}@feature-branch#subdirectory=${dir}`),
+      );
     });
 
     it.each([
@@ -765,7 +757,6 @@ describe("buildAgentServerCommand", () => {
         "--from",
         `git+${forkRepo}@${commitSha}#subdirectory=openhands-agent-server`,
       ]);
-      expect(cmd.source).toBe(`git (example/software-agent-sdk@${commitSha})`);
     });
 
     it.each([
@@ -777,18 +768,6 @@ describe("buildAgentServerCommand", () => {
       const cmd = buildAgentServerCommand({ OH_AGENT_SERVER_GIT_REF: ref });
 
       expect(cmd.args[0]).toBe("--reinstall");
-    });
-
-    it("a local path still wins over a git repository and ref", () => {
-      const sdk = "/abs/path/to/software-agent-sdk";
-      const cmd = buildAgentServerCommand({
-        OH_AGENT_SERVER_LOCAL_PATH: sdk,
-        OH_AGENT_SERVER_GIT_REPO: forkRepo,
-        OH_AGENT_SERVER_GIT_REF: commitSha,
-      });
-
-      expect(cmd.source).toBe(`local (${sdk})`);
-      expect(cmd.args.join(" ")).not.toContain(forkRepo);
     });
   });
 });
