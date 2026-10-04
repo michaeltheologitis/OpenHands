@@ -102,7 +102,7 @@ A full 40-character commit SHA is installed once and reused: the launcher passes
 
 ### Building from a fork: `config/defaults.json`
 
-A packaged desktop app started from Finder or a desktop launcher reads no shell environment. A build that runs its own SDK fork or keeps its own state says so in `config/defaults.json` instead. Upstream's file carries these keys as `null`.
+A packaged desktop app started from Finder or a desktop launcher reads no shell environment. A build that runs its own SDK fork, keeps its own state, or installs something on first launch says so in `config/defaults.json` instead. Upstream's file carries these keys as `null`.
 
 ```json
 {
@@ -110,7 +110,11 @@ A packaged desktop app started from Finder or a desktop launcher reads no shell 
     "agentServerGitRepo": "https://github.com/<owner>/software-agent-sdk",
     "agentServerGitRef": "<full commit SHA>"
   },
-  "paths": { "stateDir": "~/.example-app/agent-canvas" }
+  "paths": { "stateDir": "~/.example-app/agent-canvas" },
+  "setup": {
+    "command": ["uvx", "--from", "git+https://github.com/<owner>/<tool>@<commit>", "example-app", "setup"],
+    "phases": ["before-start", "after-ready"]
+  }
 }
 ```
 
@@ -134,6 +138,24 @@ Pin the ref to a full commit SHA so relaunches need no network. Every value is c
 | `<P>/automation/automations.db` | the automation backend's database                                                                                                                     |
 
 A build that keeps its own state names a directory whose parent is its own, such as `~/.example-app/agent-canvas`. One under `~/.openhands` shares everything except conversations with a stock Agent Canvas on the same machine.
+
+**The setup command.** `setup.command` is an argv array; `setup.phases` lists `before-start`, `after-ready`, or both (the default). The full-stack launchers (the desktop app, `npm run dev`, the `agent-canvas` bin) run it on every launch that starts the agent-server; `dev:minimal`, `dev:static` and `dev:extra-backend` do not.
+
+- `before-start` runs after the port check, before any service starts. `after-ready` runs once the agent-server answers `/server_info`, before automation, the frontend and the ingress start.
+- It runs without a shell, as the user, with `argv[0]` looked up on the launcher's `PATH` (in the packaged app: the bundled uv and Node first, then the `PATH` the OS gave the app). Its stdin is closed and its working directory is the state directory.
+- Its output goes to the startup log under `setup before-start` / `setup after-ready`, and to the desktop splash, so it must not print secrets.
+- Its environment is the launcher's own, plus:
+
+  | Variable                   | `before-start`                 | `after-ready`                                                        |
+  | -------------------------- | ------------------------------ | -------------------------------------------------------------------- |
+  | `OH_CANVAS_SETUP_PHASE`    | `before-start`                 | `after-ready`                                                        |
+  | `OH_CANVAS_SAFE_STATE_DIR` | the state directory, absolute  | the same                                                             |
+  | `OH_PERSISTENCE_DIR`       | its parent, the persistence root | the same                                                           |
+  | `AGENT_SERVER_URL`         | not set                        | `http://127.0.0.1:<agent-server port>` (direct, not through the ingress) |
+  | `SESSION_API_KEY`          | not set                        | the session key; send it as `X-Session-API-Key`                      |
+
+- Exit 0 continues the launch. A non-zero exit, a signal, a failure to start, or 15 minutes without exiting stops it: in `after-ready` the launcher first stops the agent-server, then the CLI prints the error and exits 1, and the desktop app shows its startup-failure state.
+- It runs on every launch, so it should be fast, and work offline, when it has nothing to do.
 
 ## Alternative development workflows
 

@@ -625,7 +625,13 @@ function handleServiceLog(name, line, level) {
   // Full-fidelity stream: every service and level goes to the console buffer.
   // The one-line headline below stays filtered to the interesting services.
   appendBootLog(name, clean, level);
-  if (name === "agent-server" || name === "automation") {
+  // A first-launch setup command ("setup before-start" / "setup after-ready")
+  // can run for minutes, so its lines are progress worth showing too.
+  if (
+    name === "agent-server" ||
+    name === "automation" ||
+    name.startsWith("setup ")
+  ) {
     setLoadingStatus(`${name}: ${clean}`);
   }
   // Mirror errors to a `[desktop]` terminal line so dev runs stay grep-friendly.
@@ -727,9 +733,13 @@ app.whenReady().then(async () => {
     setBootPhase("Ready.");
     createMainWindow();
   } catch (err) {
+    // A failed setup command is not a port problem; its message says what
+    // failed and that its output is in the log below.
     const summary =
-      err.message +
-      " Ensure ports 8000, 18000, and 18001 are free, then try again.";
+      err.name === "SetupCommandError"
+        ? err.message
+        : err.message +
+          " Ensure ports 8000, 18000, and 18001 are free, then try again.";
     // Record the failure in the terminal and the startup-log buffer so it
     // shows (and copies) as the final console line.
     console.error("[desktop] Startup failed:", err);
