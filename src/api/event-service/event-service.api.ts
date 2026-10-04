@@ -1,3 +1,4 @@
+import type { CancelAcpSessionResponse } from "@openhands/typescript-client";
 import { ConversationClient } from "@openhands/typescript-client/clients";
 import { RemoteEventsList } from "@openhands/typescript-client/events/remote-events-list";
 import { OpenHandsEvent } from "#/types/agent-server/core";
@@ -52,6 +53,28 @@ class EventService {
       conversationId,
       request,
     );
+  }
+
+  /**
+   * Ask the agent-server to send ACP `session/cancel` for one sub-agent
+   * session. Goes to the conversation's runtime host with its session key, as
+   * respondToConfirmation does, so local and Cloud runtimes take the same
+   * path. Rejects with the client's HttpError: 409 when the child holds no
+   * live `cancel` grant, 404 when it is unknown, 504 when the agent did not
+   * take it in time.
+   */
+  static async cancelAcpSession(
+    conversationId: string,
+    sessionId: string,
+    conversationUrl?: string | null,
+    sessionApiKey?: string | null,
+  ): Promise<CancelAcpSessionResponse> {
+    return new ConversationClient(
+      getAgentServerClientOptions({
+        conversationUrl,
+        sessionApiKey,
+      }),
+    ).cancelAcpSession(conversationId, sessionId);
   }
 
   static async getEventCount(

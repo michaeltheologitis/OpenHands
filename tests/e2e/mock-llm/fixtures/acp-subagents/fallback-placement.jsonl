@@ -1,0 +1,17 @@
+{"jsonrpc": "2.0", "id": 0, "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": false}, "authMethods": []}}
+{"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "fallback-root"}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-m", "title": "Mapped where its task was sent", "state": {"state": "running"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-1", "title": "Run plan()", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-1", "status": "completed", "rawOutput": "planned"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "session_message", "messageId": "child-m-task", "senderSessionId": "fallback-root", "recipientSessionId": "child-m", "content": [{"type": "text", "text": "Map the catalog."}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-a", "title": "Placed at its announcement", "state": {"state": "running"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-g", "title": "Names a call never sent", "state": {"state": "running"}, "_meta": {"openhands": {"parentToolCallId": "cell-never-sent"}}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "ghost", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-o", "title": "Announced on an unknown session", "state": {"state": "running"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-2", "title": "Run wrap_up()", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-2", "status": "completed", "rawOutput": "wrapped up"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-m", "state": {"state": "idle", "stopReason": "end_turn"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-a", "state": {"state": "idle", "stopReason": "end_turn"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-g", "state": {"state": "idle", "stopReason": "end_turn"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "ghost", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-o", "state": {"state": "idle", "stopReason": "end_turn"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fallback-root", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "FALLBACK_PLACEMENT_DONE"}}}}
+{"jsonrpc": "2.0", "id": 2, "result": {"stopReason": "end_turn"}}

@@ -23,8 +23,8 @@ function controlsEvent(
   };
 }
 
-const renderLatest = (conversationId = CONVERSATION_ID) =>
-  renderHook(() => useLatestAcpSessionControls(conversationId, true), {
+const renderLatest = (conversationId = CONVERSATION_ID, enabled = true) =>
+  renderHook(() => useLatestAcpSessionControls(conversationId, enabled), {
     wrapper: createQueryWrapper(),
   });
 
@@ -116,6 +116,14 @@ describe("useLatestAcpSessionControls", () => {
     const { result } = renderLatest("another-conversation");
 
     await waitFor(() => expect(EventService.searchEvents).toHaveBeenCalled());
+    expect(result.current).toBeNull();
+  });
+
+  it("ignores live events while disabled", () => {
+    seedLiveEvents(controlsEvent("live", "2026-10-01T11:00:00Z", ["live"]));
+
+    const { result } = renderLatest(CONVERSATION_ID, false);
+
     expect(result.current).toBeNull();
   });
 });
