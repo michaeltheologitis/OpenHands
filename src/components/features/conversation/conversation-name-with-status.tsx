@@ -15,6 +15,7 @@ import { ConversationName } from "./conversation-name";
 import { ConversationGitActionsToggle } from "./conversation-git-actions-toggle";
 import { ConversationOverviewToggle } from "./conversation-overview-toggle";
 import { RightPanelToggle } from "./right-panel-toggle";
+import { ConversationAppPanelToggles } from "./conversation-app-panel-toggle";
 import {
   isExecutionActive,
   isExecutionErrored,
@@ -150,6 +151,7 @@ export function ConversationNameWithStatus() {
         <ConversationGitActionsToggle />
         <ConversationOverviewToggle />
         <RightPanelToggle />
+        <ConversationAppPanelToggles />
       </div>
     </div>
   );

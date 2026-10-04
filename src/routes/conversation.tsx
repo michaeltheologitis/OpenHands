@@ -24,6 +24,8 @@ import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { useIsAuthed } from "#/hooks/query/use-is-authed";
 import { ConversationMain } from "#/components/features/conversation/conversation-main/conversation-main";
 import { ConversationMobilePanelPage } from "#/components/features/conversation/conversation-main/conversation-mobile-panel-page";
+import { ConversationAppPanelMobilePage } from "#/components/features/conversation/conversation-main/conversation-app-panel-mobile-page";
+import { CONVERSATION_APP_PANEL_ROUTE } from "#/utils/conversation-app-panel-path";
 import { ConversationOverviewDrawerProvider } from "#/components/features/conversation/conversation-overview-drawer-context";
 
 import { WebSocketProviderWrapper } from "#/contexts/websocket-provider-wrapper";
@@ -35,6 +37,7 @@ function AppContent() {
   const { t } = useTranslation("openhands");
   const { conversationId } = useConversationId();
   const panelViewMatch = useMatch("/conversations/:conversationId/panel");
+  const appPanelViewMatch = useMatch(CONVERSATION_APP_PANEL_ROUTE);
 
   const { isTask, taskStatus, taskDetail } = useTaskPollingController();
 
@@ -218,6 +221,14 @@ function AppContent() {
         <div data-testid="app-route" className="flex h-full flex-col">
           {panelViewMatch ? (
             <ConversationMobilePanelPage
+              onNavigateBack={() =>
+                navigate(`/conversations/${conversationId}`)
+              }
+            />
+          ) : appPanelViewMatch ? (
+            <ConversationAppPanelMobilePage
+              extensionName={appPanelViewMatch.params.extensionName ?? ""}
+              panelId={appPanelViewMatch.params.panelId ?? ""}
               onNavigateBack={() =>
                 navigate(`/conversations/${conversationId}`)
               }
