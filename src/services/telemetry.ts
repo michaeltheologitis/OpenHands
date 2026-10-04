@@ -701,6 +701,21 @@ export function isTelemetryEnabled(): boolean {
 }
 
 /**
+ * Whether this build reports telemetry at all: it has a PostHog key and is not
+ * built or served with do-not-track. Otherwise there is no consent to ask for.
+ * A browser's own Do Not Track setting does not count: the consent a local
+ * backend records also governs that backend's own reports.
+ */
+export function isTelemetryAvailable(): boolean {
+  const config = getResolvedTelemetryConfig();
+  return (
+    config !== null &&
+    config.apiKey !== "" &&
+    import.meta.env?.VITE_DO_NOT_TRACK !== "1"
+  );
+}
+
+/**
  * Check if first use event has already been sent
  */
 function hasFirstUseSent(): boolean {

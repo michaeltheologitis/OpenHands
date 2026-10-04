@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   isSavingSettings: false,
   saveSettings: vi.fn<(args: unknown) => Promise<void>>(),
   setTelemetryConsent: vi.fn<(value: string) => Promise<void>>(),
+  isTelemetryAvailable: true,
   translate: vi.fn<(key: string, params?: Record<string, string>) => string>(),
   useTranslation: vi.fn<(namespace: string) => void>(),
 }));
@@ -74,6 +75,7 @@ vi.mock("#/hooks/mutation/use-save-settings", () => ({
 
 vi.mock("#/services/telemetry", () => ({
   setTelemetryConsent: (value: string) => mocks.setTelemetryConsent(value),
+  isTelemetryAvailable: () => mocks.isTelemetryAvailable,
 }));
 
 interface RenderOptions {
@@ -92,6 +94,7 @@ function prime() {
   mocks.isSavingSettings = false;
   mocks.saveSettings.mockResolvedValue(undefined);
   mocks.setTelemetryConsent.mockResolvedValue(undefined);
+  mocks.isTelemetryAvailable = true;
   mocks.translate.mockImplementation(
     (key, params) =>
       (translations[key] ?? `Missing:${key}`) +
@@ -182,6 +185,12 @@ describe("telemetry consent banner", () => {
       "translations are not ready",
       () => {
         mocks.ready = false;
+      },
+    ],
+    [
+      "the build has no telemetry key or is built with do-not-track",
+      () => {
+        mocks.isTelemetryAvailable = false;
       },
     ],
   ])("stays hidden when %s", (_reason, mutate) => {
