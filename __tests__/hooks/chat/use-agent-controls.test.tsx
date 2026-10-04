@@ -81,27 +81,26 @@ const controlsEvent: ACPSessionControlsEvent = {
 };
 
 // The set route's failures, as the TypeScript client throws them.
-const gatewayTimeoutBody = {
-  detail: "Internal Server Error",
-  exception:
-    "504: ACP server did not answer session/set_config_option for 'profile' within 30s",
-};
-const gatewayTimeout = Object.assign(
-  new Error(
-    `HTTP request failed (504 Gateway Timeout): ${JSON.stringify(gatewayTimeoutBody)}`,
-  ),
-  { name: "HttpError", status: 504, response: gatewayTimeoutBody },
-);
-// An answer the set route refused, as the TypeScript client throws it.
-const answered = (status: number, statusText: string, detail: string) =>
+const httpError = (status: number, statusText: string, body: object) =>
   new HttpError(
     status,
     statusText,
-    { detail },
-    `HTTP request failed (${status} ${statusText}): ${JSON.stringify({ detail })}`,
+    body,
+    `HTTP request failed (${status} ${statusText}): ${JSON.stringify(body)}`,
   );
-const badRequest = answered(400, "Bad Request", "profile must be a string");
-const notFound = answered(404, "Not Found", "Conversation not found");
+const refusal = (sentence: string) =>
+  httpError(422, "Unprocessable Entity", { detail: sentence });
+const gatewayTimeout = httpError(504, "Gateway Timeout", {
+  detail: "Internal Server Error",
+  exception:
+    "504: ACP server did not answer session/set_config_option for 'profile' within 30s",
+});
+const badRequest = httpError(400, "Bad Request", {
+  detail: "profile must be a string",
+});
+const notFound = httpError(404, "Not Found", {
+  detail: "Conversation not found",
+});
 const clientTimeout = new Error("Request timeout after 60000ms", {
   cause: new DOMException("The operation timed out.", "TimeoutError"),
 });
@@ -244,14 +243,7 @@ describe("useConversationAgentControls", () => {
       AgentServerConversationService,
       "setAcpConfigOption",
     ).mockRejectedValue(
-      Object.assign(new Error("HTTP request failed (422)"), {
-        name: "HttpError",
-        status: 422,
-        response: {
-          detail:
-            "profile is fixed once the session has started (it is 'fast')",
-        },
-      }),
+      refusal("profile is fixed once the session has started (it is 'fast')"),
     );
     const { result } = renderControls();
     await waitFor(() => expect(result.current.options).toHaveLength(1));
@@ -285,7 +277,7 @@ describe("useConversationAgentControls", () => {
     );
 
     unmount();
-    refuse(answered(422, "Unprocessable Entity", "profile is fixed"));
+    refuse(refusal("profile is fixed"));
 
     await waitFor(() =>
       expect(displayErrorToast).toHaveBeenCalledWith("profile is fixed"),

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HttpError } from "@openhands/typescript-client";
 import type { Backend } from "#/api/backend-registry/types";
 import {
   APP_BACKEND_SESSION_MIN_REFRESH_MS,
@@ -138,9 +139,7 @@ describe("acquireAppBackendSession", () => {
     const secondLost = vi.fn();
     first.onLost(firstLost);
     second.onLost(secondLost);
-    createSession.mockRejectedValue(
-      Object.assign(new Error("HTTP 403"), { name: "HttpError", status: 403 }),
-    );
+    createSession.mockRejectedValue(new HttpError(403, "Forbidden"));
 
     await vi.advanceTimersByTimeAsync(FIVE_MINUTES);
 

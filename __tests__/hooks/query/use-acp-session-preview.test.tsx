@@ -2,9 +2,10 @@ import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  ACPConfigOptionValues,
-  ACPSessionControls,
+import {
+  HttpError,
+  type ACPConfigOptionValues,
+  type ACPSessionControls,
 } from "@openhands/typescript-client";
 import AgentProfilesService from "#/api/agent-profiles-service/agent-profiles-service.api";
 import { localAgentServerHasCapability } from "#/api/agent-server-compatibility";
@@ -92,11 +93,7 @@ function previewOf(values: ACPConfigOptionValues): ACPSessionControls {
 }
 
 const httpError = (status: number, detail?: string) =>
-  Object.assign(new Error(`HTTP request failed (${status})`), {
-    name: "HttpError",
-    status,
-    response: detail ? { detail } : null,
-  });
+  new HttpError(status, "", detail ? { detail } : null);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const [client] = React.useState(

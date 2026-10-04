@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HttpError } from "@openhands/typescript-client";
 import { getCachedAgentServerInfo } from "#/api/agent-server-compatibility";
 import type { Backend } from "#/api/backend-registry/types";
 import { mountAppBackendFrame } from "./mount-app-backend-frame";
@@ -44,14 +45,13 @@ const owner = { backend: local, extensionName: "library" };
 // `detail`; a 5xx carries "Internal Server Error" there and the reason under
 // `exception`.
 const httpError = (status: number, reason: string) =>
-  Object.assign(new Error(`HTTP ${status}`), {
-    name: "HttpError",
+  new HttpError(
     status,
-    response:
-      status >= 500
-        ? { detail: "Internal Server Error", exception: `${status}: ${reason}` }
-        : { detail: reason },
-  });
+    "",
+    status >= 500
+      ? { detail: "Internal Server Error", exception: `${status}: ${reason}` }
+      : { detail: reason },
+  );
 
 function serveBridge(ingress: string | null = INGRESS) {
   vi.mocked(getCachedAgentServerInfo).mockReturnValue({
