@@ -81,9 +81,22 @@ function whereCommandLookup(command) {
  * `getProcessTreeSpawnOptions()`. Without the negative pid, shutdown would
  * often stop only the wrapper process and leave the actual server child
  * listening on its port.
+ *
+ * A tree whose leader has exited is skipped, since the id of an emptied group
+ * can be reused. `evenIfLeaderExited` signals the group anyway, for a caller
+ * that knows it may still have members: a command that exits leaving a
+ * background child holding its output. Windows has no group to signal once
+ * the leader is gone (taskkill /t walks the tree from it), so there the option
+ * changes nothing.
  */
-export function signalProcessTree(proc, signal) {
-  if (!isProcessRunning(proc)) {
+export function signalProcessTree(
+  proc,
+  signal,
+  { evenIfLeaderExited = false } = {},
+) {
+  const groupMayOutliveLeader =
+    evenIfLeaderExited && process.platform !== "win32" && proc.pid;
+  if (!isProcessRunning(proc) && !groupMayOutliveLeader) {
     return false;
   }
 

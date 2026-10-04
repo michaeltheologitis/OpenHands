@@ -732,11 +732,81 @@ function spawnService(name, command, args, options = {}) {
       logService(name, `Exited with code ${code}`, c.red);
       emitServiceLog(name, `exited with code ${code}`, "error");
     }
-    processes.delete(name);
   });
 
-  processes.set(name, proc);
+  // A service runs until its process exits, or, spawned with
+  // `untilOutputCloses`, until its output closes: a child it left in the
+  // background can hold that output, in its process group, after the command
+  // itself has exited. end() is also how the launcher gives up waiting.
+  const untilOutputCloses = options.untilOutputCloses === true;
+  const service = { proc, untilOutputCloses, ended: false };
+  service.whenEnded = new Promise((resolve) => {
+    service.end = () => {
+      service.ended = true;
+      processes.delete(name);
+      resolve();
+    };
+  });
+  proc.once(untilOutputCloses ? "close" : "exit", service.end);
+  processes.set(name, service);
   return proc;
+}
+
+// How long a process tree sent SIGTERM gets before SIGKILL.
+const FORCE_STOP_DELAY_MS = 3000;
+
+// How long a service that runs until its output closes is waited for after its
+// SIGKILL. A child no signal reaches (one that left its process group, or on
+// Windows any child once the command has exited) can hold that output open for
+// good; one the SIGKILL reached is gone well within this.
+const OUTPUT_CLOSE_WAIT_MS = 1000;
+
+/** Whether a service from spawnService() has not yet ended. */
+function isServiceRunning({ proc, untilOutputCloses, ended }) {
+  return untilOutputCloses ? !ended : isProcessRunning(proc);
+}
+
+/**
+ * Signal a running service's process tree. One that runs until its output
+ * closes is signalled as a group even when its own process has exited, since
+ * a child it left in the background may hold that output.
+ */
+function signalService({ proc, untilOutputCloses }, signal) {
+  signalProcessTree(proc, signal, { evenIfLeaderExited: untilOutputCloses });
+}
+
+/**
+ * Stop a service: SIGTERM to its process tree, and SIGKILL
+ * FORCE_STOP_DELAY_MS later if it is still running. Resolves true once it has
+ * ended, or false if it runs until its output closes and that output is still
+ * open OUTPUT_CLOSE_WAIT_MS after the SIGKILL. `quiet` leaves out the
+ * "Stopping..." and "Force stopping..." lines.
+ * @returns {Promise<boolean>}
+ */
+function stopService(name, service, { quiet = false } = {}) {
+  if (!quiet) logService(name, "Stopping...", c.dim);
+  signalService(service, "SIGTERM");
+  return new Promise((stopped) => {
+    let giveUp = null;
+    const forceStop = setTimeout(() => {
+      if (!quiet) logService(name, "Force stopping...", c.dim);
+      signalService(service, "SIGKILL");
+      if (service.untilOutputCloses) {
+        giveUp = setTimeout(() => stopped(false), OUTPUT_CLOSE_WAIT_MS);
+      }
+    }, FORCE_STOP_DELAY_MS);
+    service.whenEnded.then(() => {
+      clearTimeout(forceStop);
+      clearTimeout(giveUp);
+      stopped(true);
+    });
+  });
+}
+
+/** Stop waiting for a service whose output is still open after its SIGKILL. */
+function abandonService(name, service) {
+  logService(name, "Output still open after SIGKILL; not waiting", c.dim);
+  service.end();
 }
 
 // How many of a service's last output lines an early-exit error quotes.
@@ -1164,10 +1234,195 @@ function startAutomationBackend(config) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Setup Command
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A build's config/defaults.json may name a command the launcher runs as the
+// user on every launch that starts the agent-server: `before-start` before any
+// service starts, `after-ready` once the agent-server answers /server_info
+// (with its URL and the session key) and before automation, the frontend and
+// the ingress start. Anything but exit 0 stops the launch.
+
+/** How long one setup phase may run before it is stopped. */
+const SETUP_COMMAND_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * A setup command that did not exit 0. Its `name` is "SetupCommandError", so
+ * a caller can recognise it without importing the class.
+ */
+export class SetupCommandError extends Error {
+  /**
+   * @param {string} message
+   * @param {{
+   *   phase: "before-start" | "after-ready",
+   *   command: string[],
+   *   reason: "exit" | "signal" | "spawn" | "timeout",
+   *   exitCode: number | null,
+   *   signal: string | null,
+   * }} details
+   */
+  constructor(message, details) {
+    super(message);
+    this.name = "SetupCommandError";
+    Object.assign(this, details);
+  }
+}
+
+function formatDuration(ms) {
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+function formatTimeout(ms) {
+  if (ms % 60_000 !== 0) return `${ms} ms`;
+  const minutes = ms / 60_000;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function setupFailureMessage({
+  command,
+  phase,
+  reason,
+  exitCode,
+  signal,
+  spawnError,
+  timeoutMs,
+}) {
+  const what = {
+    exit: `failed (exit ${exitCode})`,
+    signal: `was killed by ${signal}`,
+    timeout: `was stopped after ${formatTimeout(timeoutMs)}`,
+    spawn: `could not be started (${spawnError?.message})`,
+  }[reason];
+  const when =
+    phase === "before-start"
+      ? "before the stack started."
+      : "after the agent-server started; the stack was stopped.";
+  const output = reason === "spawn" ? "" : " Its output is in the startup log.";
+  return `Setup command \`${command.join(" ")}\` ${what} ${when}${output}`;
+}
+
+/**
+ * Run one phase of the setup command through spawnService under the name
+ * `setup ${phase}`: stdin closed, every output line to the service log, `env`
+ * added to process.env, cwd as given. Writes "Running <argv>" first and
+ * "Done in <duration>" on success, to the terminal and the service-log
+ * listener.
+ *
+ * The command runs until its output closes, not only until it exits. At
+ * `timeoutMs` it is stopped as stopService() stops a service, its process
+ * group signalled whether or not the command itself has exited, and the
+ * promise rejects once it has ended, or OUTPUT_CLOSE_WAIT_MS after the SIGKILL
+ * if a child no signal reaches still holds its output. A quit stops it with
+ * the other services; the promise then settles neither way.
+ * @param {{
+ *   command: string[],
+ *   phase: "before-start" | "after-ready",
+ *   cwd: string,
+ *   env: Record<string, string>,
+ *   timeoutMs?: number,
+ * }} options  timeoutMs defaults to SETUP_COMMAND_TIMEOUT_MS
+ * @returns {Promise<{ durationMs: number }>}
+ * @throws {SetupCommandError} on a non-zero exit, a signal, a spawn error or the timeout
+ */
+export async function runSetupCommand({
+  command,
+  phase,
+  cwd,
+  env,
+  timeoutMs = SETUP_COMMAND_TIMEOUT_MS,
+}) {
+  const name = `setup ${phase}`;
+  const startedAt = Date.now();
+  logServiceEvent(name, `Running ${command.join(" ")}`, c.cyan);
+  const proc = spawnService(name, command[0], command.slice(1), {
+    cwd,
+    env,
+    color: c.cyan,
+    untilOutputCloses: true,
+  });
+
+  const service = processes.get(name);
+
+  let timedOut = false;
+  const timeout = setTimeout(async () => {
+    timedOut = true;
+    // The timeout's own message reports the stop.
+    const ended = await stopService(name, service, { quiet: true });
+    // Once a quit has begun, stopServices() owns the service.
+    if (!ended && !shuttingDown) abandonService(name, service);
+  }, timeoutMs);
+  const spawnFailure = new Promise((resolve) => {
+    proc.once("error", (error) => {
+      // Only a process that never started has no pid; any other error (a
+      // failed kill) still ends the service.
+      if (proc.pid === undefined) resolve(error);
+    });
+  });
+  const spawnError = await Promise.race([
+    service.whenEnded.then(() => null),
+    spawnFailure,
+  ]);
+  clearTimeout(timeout);
+  // A quit stops the command with the other services; the phase then settles
+  // neither way, so nothing waiting on it runs on while the launcher exits.
+  if (shuttingDown) return new Promise(() => {});
+
+  const durationMs = Date.now() - startedAt;
+  const { exitCode, signalCode: signal } = proc;
+  const reason = spawnError
+    ? "spawn"
+    : timedOut
+      ? "timeout"
+      : signal
+        ? "signal"
+        : "exit";
+  if (reason === "exit" && exitCode === 0) {
+    logServiceEvent(name, `Done in ${formatDuration(durationMs)}`, c.green);
+    return { durationMs };
+  }
+  throw new SetupCommandError(
+    setupFailureMessage({
+      command,
+      phase,
+      reason,
+      exitCode,
+      signal,
+      spawnError,
+      timeoutMs,
+    }),
+    {
+      phase,
+      command,
+      reason,
+      exitCode: spawnError ? null : exitCode,
+      signal: spawnError ? null : signal,
+    },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════════════════
 
 let shuttingDown = false;
+
+/**
+ * Stop every service this launcher is running, as stopService() does, and
+ * resolve once all have ended; a service whose output is still open after its
+ * SIGKILL is dropped. Does not exit the launcher.
+ */
+async function stopServices() {
+  const running = [...processes].filter(([, service]) =>
+    isServiceRunning(service),
+  );
+  await Promise.all(
+    running.map(async ([name, service]) => {
+      if (!(await stopService(name, service))) abandonService(name, service);
+    }),
+  );
+}
 
 function shutdown() {
   if (shuttingDown) return;
@@ -1177,21 +1432,10 @@ function shutdown() {
   console.log(`${c.yellow}Shutting down...${c.reset}`);
   fileLog("info", "Shutting down...");
 
-  for (const [name, proc] of processes) {
-    logService(name, "Stopping...", c.dim);
-    signalProcessTree(proc, "SIGTERM");
-  }
-
-  setTimeout(() => {
-    for (const [name, proc] of processes) {
-      if (isProcessRunning(proc)) {
-        logService(name, "Force stopping...", c.dim);
-        signalProcessTree(proc, "SIGKILL");
-      }
-    }
+  stopServices().then(() => {
     shutdownHooks.run();
     process.exit(0);
-  }, 3000);
+  });
 }
 
 process.on("SIGINT", shutdown);

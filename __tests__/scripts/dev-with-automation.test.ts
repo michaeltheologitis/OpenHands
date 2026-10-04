@@ -6,7 +6,7 @@
 // http://localhost:3000/), breaking that resolution; the Node environment
 // has the standard WHATWG URL behavior that honors the file:// base.
 import net from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   cpSync,
@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -21,7 +22,15 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it, afterEach, onTestFinished, vi } from "vitest";
+import {
+  describe,
+  expect,
+  it,
+  afterEach,
+  beforeEach,
+  onTestFinished,
+  vi,
+} from "vitest";
 import {
   buildAgentServerAutomationEnv,
   buildAutomationCommand,
@@ -35,7 +44,9 @@ import {
   getFrontendBackend,
   getLocalServiceRoutes,
   getRejectPrefixes,
+  runSetupCommand,
   setServiceLogListener,
+  SetupCommandError,
   spawnService,
   validateLocalAutomationPath,
   DEFAULT_AUTOMATION_REPO,
@@ -965,6 +976,261 @@ describe("setServiceLogListener", () => {
   });
 });
 
+describe("setup command", () => {
+  describe("runSetupCommand", () => {
+    const logged: Array<{ name: string; line: string; level: string }> = [];
+    const node = (source: string, ...args: string[]) => [
+      process.execPath,
+      "-e",
+      source,
+      ...args,
+    ];
+    const run = (
+      command: string[],
+      options: Partial<Parameters<typeof runSetupCommand>[0]> = {},
+    ) =>
+      runSetupCommand({
+        command,
+        phase: "before-start",
+        cwd: tmpdir(),
+        env: {},
+        ...options,
+      });
+    const linesOf = (name: string) =>
+      logged.filter((entry) => entry.name === name).map((entry) => entry.line);
+    /** The first match of `pattern` in the command's output, once printed. */
+    const printed = async (pattern: RegExp) => {
+      for (;;) {
+        const match = logged
+          .map((entry) => entry.line.match(pattern))
+          .find(Boolean);
+        if (match) return match;
+        await delay(10);
+      }
+    };
+    /** Resolves once `pid`, a child of this process, has been reaped. */
+    const reaped = async (pid: number) => {
+      while (spawnSync("ps", ["-p", String(pid)]).status === 0) {
+        await delay(10);
+      }
+    };
+
+    beforeEach(() => {
+      logged.length = 0;
+      setServiceLogListener((name: string, line: string, level: string) => {
+        logged.push({ name, line, level });
+      });
+    });
+
+    afterEach(() => {
+      setServiceLogListener(null);
+    });
+
+    it("streams each output line to the service log under its phase, between Running and Done", async () => {
+      const command = node('console.log("one")');
+
+      await run(command, { phase: "after-ready" });
+
+      expect(
+        logged.filter((entry) => entry.name === "setup after-ready"),
+      ).toEqual([
+        {
+          name: "setup after-ready",
+          line: `Running ${command.join(" ")}`,
+          level: "info",
+        },
+        { name: "setup after-ready", line: "one", level: "stdout" },
+        {
+          name: "setup after-ready",
+          line: expect.stringMatching(/^Done in \d+s$/),
+          level: "info",
+        },
+      ]);
+    });
+
+    it("runs argv without a shell, stdin closed, in the given working directory with the given variables", async () => {
+      const cwd = mkdtempSync(path.join(tmpdir(), "setup-cwd-"));
+      onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+
+      // It prints once stdin ends, which it would never do were stdin open.
+      await run(
+        node(
+          'process.stdin.on("end", () => console.log(JSON.stringify([process.argv.slice(1), process.cwd(), process.env.EXAMPLE_SETUP_VAR]))); process.stdin.resume()',
+          "$HOME; echo x",
+        ),
+        { cwd, env: { EXAMPLE_SETUP_VAR: "from-the-launcher" } },
+      );
+
+      expect(linesOf("setup before-start")).toContain(
+        JSON.stringify([
+          ["$HOME; echo x"],
+          realpathSync(cwd),
+          "from-the-launcher",
+        ]),
+      );
+    });
+
+    it.each([
+      ["before-start", "before the stack started."],
+      ["after-ready", "after the agent-server started; the stack was stopped."],
+    ] as const)(
+      "a non-zero exit rejects with a SetupCommandError naming the command, phase and exit code (%s)",
+      async (phase, clause) => {
+        const command = node("process.exit(2)");
+
+        const error = await run(command, { phase }).catch((e) => e);
+
+        expect(error).toBeInstanceOf(SetupCommandError);
+        expect(error).toMatchObject({
+          name: "SetupCommandError",
+          message: `Setup command \`${command.join(" ")}\` failed (exit 2) ${clause} Its output is in the startup log.`,
+          phase,
+          command,
+          reason: "exit",
+          exitCode: 2,
+          signal: null,
+        });
+      },
+    );
+
+    it.skipIf(process.platform === "win32")(
+      "a command killed by a signal rejects naming the signal",
+      async () => {
+        const command = node('process.kill(process.pid, "SIGKILL")');
+
+        const error = await run(command).catch((e) => e);
+
+        expect(error).toMatchObject({
+          message: `Setup command \`${command.join(" ")}\` was killed by SIGKILL before the stack started. Its output is in the startup log.`,
+          reason: "signal",
+          exitCode: null,
+          signal: "SIGKILL",
+        });
+      },
+    );
+
+    it("a command that cannot be started rejects with a SetupCommandError", async () => {
+      const error = await run([
+        "example-app-that-is-not-installed",
+        "setup",
+      ]).catch((e) => e);
+
+      expect(error).toBeInstanceOf(SetupCommandError);
+      expect(error).toMatchObject({
+        message:
+          "Setup command `example-app-that-is-not-installed setup` could not be started (spawn example-app-that-is-not-installed ENOENT) before the stack started.",
+        reason: "spawn",
+        exitCode: null,
+        signal: null,
+      });
+    });
+
+    describe("at its timeout", () => {
+      // The timeout runs out when the test advances the clock, once the
+      // command has printed what the test needs, however slowly it started.
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it.skipIf(process.platform === "win32")(
+        "a command still running at its 15-minute default timeout is stopped, with its background children, and rejects",
+        async () => {
+          const command = ["sh", "-c", "sleep 300 & echo $$ $!; wait"];
+
+          const stopped = run(command).catch((e) => e);
+          const [, shell, child] = await printed(/^(\d+) (\d+)$/);
+          expect(hasExited(Number(child))).toBe(false);
+          vi.advanceTimersByTime(15 * 60_000);
+          const error = await stopped;
+
+          expect(error).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 15 minutes before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
+          expect(() => process.kill(Number(shell), 0)).toThrow(/ESRCH/);
+          await expect
+            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
+            .toBe(true);
+        },
+      );
+
+      it.skipIf(process.platform === "win32")(
+        "a command that ignores SIGTERM is killed with SIGKILL 3 s later",
+        async () => {
+          const command = node(
+            'process.on("SIGTERM", () => console.log("ignored SIGTERM")); console.log("ready"); setInterval(() => {}, 1_000)',
+          );
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          await printed(/^ready$/);
+          vi.advanceTimersByTime(200);
+          await printed(/^ignored SIGTERM$/);
+          vi.advanceTimersByTime(3_000);
+          const error = await stopped;
+
+          expect(error).toMatchObject({ reason: "timeout", signal: "SIGKILL" });
+        },
+      );
+
+      it.skipIf(process.platform === "win32").each([
+        ["obeys", "", 200],
+        ["ignores", 'trap "" TERM; ', 200 + 3_000],
+      ])(
+        "the stop reaches a background child that %s SIGTERM after the command itself has exited",
+        async (_, trap, untilStopped) => {
+          const command = ["sh", "-c", `${trap}sleep 300 & echo $$ $!`];
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, shell, child] = await printed(/^(\d+) (\d+)$/);
+          await reaped(Number(shell));
+          expect(hasExited(Number(child))).toBe(false);
+          vi.advanceTimersByTime(untilStopped);
+          const error = await stopped;
+
+          expect(error).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
+          await expect
+            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
+            .toBe(true);
+        },
+      );
+
+      it.skipIf(process.platform === "win32")(
+        "a background child that left the command's process group holds the phase at most 1 s past the SIGKILL",
+        async () => {
+          const command = node(
+            'const child = require("node:child_process").spawn("sleep", ["300"], { detached: true, stdio: "inherit" }); child.unref(); console.log(process.pid, child.pid);',
+          );
+
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, leader, child] = await printed(/^(\d+) (\d+)$/);
+          killAtEnd(Number(child));
+          await reaped(Number(leader));
+          vi.advanceTimersByTime(200);
+          vi.advanceTimersByTime(3_000);
+          vi.advanceTimersByTime(1_000);
+
+          expect(
+            await Promise.race([
+              stopped,
+              delay(5_000).then(() => "still pending"),
+            ]),
+          ).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
+        },
+      );
+    });
+  });
+});
+
 describe("dev-with-automation CLI", () => {
   it.skipIf(process.platform === "win32")(
     "cleans up detached services when the launcher receives SIGHUP",
@@ -1279,6 +1545,24 @@ function readJsonLines<T>(file: string): T[] {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as T);
+}
+
+/**
+ * Whether `pid` has exited, counting a zombie that nobody reaped yet. A killed
+ * child can still be exiting when the command's output closes.
+ */
+function hasExited(pid: number) {
+  const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+    encoding: "utf8",
+  }).stdout.trim();
+  return state === "" || state.startsWith("Z");
+}
+
+/** SIGKILL `pid` when the test ends, unless it has exited by then. */
+function killAtEnd(pid: number) {
+  onTestFinished(() => {
+    if (!hasExited(pid)) process.kill(pid, "SIGKILL");
+  });
 }
 
 /**
