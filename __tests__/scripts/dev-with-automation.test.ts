@@ -9,12 +9,10 @@ import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
-  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -24,7 +22,15 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
+import {
+  describe,
+  expect,
+  it,
+  afterEach,
+  beforeEach,
+  onTestFinished,
+  vi,
+} from "vitest";
 import {
   buildAgentServerAutomationEnv,
   buildAutomationCommand,
@@ -54,6 +60,7 @@ import {
   buildAgentServerEnv,
   buildSafeDevConfig,
   findFreePorts,
+  isPortBusy,
   resetPersistedSessionApiKeyCache,
 } from "../../scripts/dev-safe.mjs";
 import { createRouter } from "../../scripts/proxy-utils.mjs";
@@ -1102,20 +1109,18 @@ describe("setup command", () => {
 
     it("runs in the given working directory with the given variables", async () => {
       const cwd = mkdtempSync(path.join(tmpdir(), "setup-cwd-"));
-      try {
-        await run(
-          node(
-            "console.log(process.cwd()); console.log(process.env.EXAMPLE_SETUP_VAR)",
-          ),
-          { cwd, env: { EXAMPLE_SETUP_VAR: "from-the-launcher" } },
-        );
+      onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
 
-        const lines = linesOf("setup before-start");
-        expect(lines).toContain(realpathSync(cwd));
-        expect(lines).toContain("from-the-launcher");
-      } finally {
-        rmSync(cwd, { recursive: true, force: true });
-      }
+      await run(
+        node(
+          "console.log(process.cwd()); console.log(process.env.EXAMPLE_SETUP_VAR)",
+        ),
+        { cwd, env: { EXAMPLE_SETUP_VAR: "from-the-launcher" } },
+      );
+
+      const lines = linesOf("setup before-start");
+      expect(lines).toContain(realpathSync(cwd));
+      expect(lines).toContain("from-the-launcher");
     });
 
     it.each([
@@ -1271,25 +1276,21 @@ describe("setup command", () => {
 
           const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
           const [, leader, child] = await printed(/^(\d+) (\d+)$/);
-          try {
-            await reaped(Number(leader));
-            vi.advanceTimersByTime(200);
-            vi.advanceTimersByTime(3_000);
-            vi.advanceTimersByTime(1_000);
+          killAtEnd(Number(child));
+          await reaped(Number(leader));
+          vi.advanceTimersByTime(200);
+          vi.advanceTimersByTime(3_000);
+          vi.advanceTimersByTime(1_000);
 
-            expect(
-              await Promise.race([
-                stopped,
-                delay(5_000).then(() => "still pending"),
-              ]),
-            ).toMatchObject({
-              message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
-              reason: "timeout",
-            });
-          } finally {
-            if (!hasExited(Number(child)))
-              process.kill(Number(child), "SIGKILL");
-          }
+          expect(
+            await Promise.race([
+              stopped,
+              delay(5_000).then(() => "still pending"),
+            ]),
+          ).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
         },
       );
     });
@@ -1507,82 +1508,6 @@ describe("dev-with-automation CLI", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")(
-    "fails at once, with the exit code and last output, when the agent-server exits before answering",
-    async () => {
-      // A uvx that fails at once (no network, a bad ref) must not leave the
-      // launcher waiting out its readiness timeout: 60 s here, 10 minutes in
-      // the desktop app.
-      const home = mkdtempSync(path.join(tmpdir(), "dwa-early-exit-home-"));
-      const stubBinDir = mkdtempSync(
-        path.join(tmpdir(), "dwa-early-exit-bin-"),
-      );
-      writeFileSync(
-        path.join(stubBinDir, "uvx"),
-        [
-          "#!/bin/sh",
-          'echo "Resolving openhands-agent-server"',
-          'echo "error: Failed to fetch: network unreachable" >&2',
-          "exit 3",
-        ].join("\n"),
-        { mode: 0o755 },
-      );
-      const ports = await findFreePorts([
-        { name: "ingress", preferred: 0 },
-        { name: "agentServer", preferred: 0 },
-        { name: "automation", preferred: 0 },
-      ]);
-
-      const startedAt = Date.now();
-      const child = spawn(
-        process.execPath,
-        ["scripts/dev-with-automation.mjs", "--backend-only"],
-        {
-          cwd: repoRoot,
-          env: {
-            PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
-            HOME: home,
-            PORT: String(ports.ingress),
-            OH_CANVAS_SAFE_BACKEND_PORT: String(ports.agentServer),
-            OH_CANVAS_SAFE_AUTOMATION_PORT: String(ports.automation),
-          },
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      let output = "";
-      child.stdout.on("data", (chunk) => {
-        output += chunk.toString();
-      });
-      child.stderr.on("data", (chunk) => {
-        output += chunk.toString();
-      });
-
-      try {
-        const exitResult = await Promise.race([
-          once(child, "exit").then(([code]) => ({ code, timedOut: false })),
-          delay(20_000).then(() => ({ code: null, timedOut: true })),
-        ]);
-
-        expect(exitResult.timedOut, output).toBe(false);
-        expect(Date.now() - startedAt).toBeLessThan(20_000);
-        expect(exitResult.code).toBe(1);
-        expect(output).toContain(
-          "agent-server exited before startup completed (code=3, signal=null). Last output:",
-        );
-        const lastOutput = output.slice(output.indexOf("Last output:"));
-        expect(lastOutput).toContain("Resolving openhands-agent-server");
-        expect(lastOutput).toContain(
-          "error: Failed to fetch: network unreachable",
-        );
-      } finally {
-        if (child.exitCode === null) child.kill("SIGKILL");
-        rmSync(home, { recursive: true, force: true });
-        rmSync(stubBinDir, { recursive: true, force: true });
-      }
-    },
-    30_000,
-  );
-
   it("exits promptly when uvx is missing", async () => {
     const child = spawn(process.execPath, ["scripts/dev-with-automation.mjs"], {
       cwd: repoRoot,
@@ -1626,8 +1551,10 @@ describe("dev-with-automation CLI", () => {
 // tools/ and a config/defaults.json the test writes. Outside the repository a
 // bare npm import in a launcher script fails here as it does in the installed
 // app. A stub `uvx` first on PATH records its argv and answers 200 on its
-// --port, standing in for the agent-server and the automation backend. The
-// ingress cannot resolve httpxy here and logs that; nothing below depends on it.
+// --port, standing in for the agent-server and the automation backend; with
+// UVX_STUB_AGENT_SERVER_FAILS set, the agent-server fails at once as a uvx
+// without network does. The ingress cannot resolve httpxy here and logs that;
+// nothing below depends on it.
 
 const UVX_STUB_SOURCE = `
 import { appendFileSync } from "node:fs";
@@ -1648,6 +1575,11 @@ record({
     OH_SESSION_API_KEYS_0: process.env.OH_SESSION_API_KEYS_0,
   },
 });
+if (service === "agent-server" && process.env.UVX_STUB_AGENT_SERVER_FAILS) {
+  console.log("Resolving openhands-agent-server");
+  console.error("error: Failed to fetch: network unreachable");
+  process.exit(3);
+}
 const port = Number(argv[argv.indexOf("--port") + 1]);
 http
   .createServer((req, res) => {
@@ -1701,6 +1633,10 @@ type UvxRecord = {
   url?: string;
 };
 
+const REPO_DEFAULTS = JSON.parse(
+  readFileSync(path.join(repoRoot, "config", "defaults.json"), "utf8"),
+);
+
 function readJsonLines<T>(file: string): T[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, "utf8")
@@ -1720,37 +1656,45 @@ function hasExited(pid: number) {
   return state === "" || state.startsWith("Z");
 }
 
-async function waitUntil(condition: () => boolean, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition() && Date.now() < deadline) {
-    await delay(50);
-  }
-  return condition();
+/** SIGKILL `pid` when the test ends, unless it has exited by then. */
+function killAtEnd(pid: number) {
+  onTestFinished(() => {
+    if (!hasExited(pid)) process.kill(pid, "SIGKILL");
+  });
 }
 
+/**
+ * A copy of what the desktop app ships, with `launcherDefaults` merged over
+ * the repository's config/defaults.json, removed when the test ends.
+ */
 function createPackagedApp(
-  launcherDefaults: (root: string) => Record<string, unknown>,
+  launcherDefaults:
+    | Record<string, unknown>
+    | ((root: string) => Record<string, unknown>),
 ) {
   const root = mkdtempSync(path.join(tmpdir(), "canvas-packaged-"));
-  mkdirSync(path.join(root, "scripts"));
-  for (const file of readdirSync(path.join(repoRoot, "scripts"))) {
-    if (file.endsWith(".mjs")) {
-      copyFileSync(
-        path.join(repoRoot, "scripts", file),
-        path.join(root, "scripts", file),
-      );
-    }
-  }
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(repoRoot, "scripts");
+  cpSync(scripts, path.join(root, "scripts"), {
+    recursive: true,
+    filter: (source) => source === scripts || source.endsWith(".mjs"),
+  });
   cpSync(path.join(repoRoot, "tools"), path.join(root, "tools"), {
     recursive: true,
   });
-  const repoDefaults = JSON.parse(
-    readFileSync(path.join(repoRoot, "config", "defaults.json"), "utf8"),
-  );
   mkdirSync(path.join(root, "config"));
   writeFileSync(
     path.join(root, "config", "defaults.json"),
-    JSON.stringify({ ...repoDefaults, ...launcherDefaults(root) }, null, 2),
+    JSON.stringify(
+      {
+        ...REPO_DEFAULTS,
+        ...(typeof launcherDefaults === "function"
+          ? launcherDefaults(root)
+          : launcherDefaults),
+      },
+      null,
+      2,
+    ),
   );
 
   const bin = path.join(root, "bin");
@@ -1784,6 +1728,11 @@ function setupStubCommand(root: string) {
 
 type PackagedApp = ReturnType<typeof createPackagedApp>;
 
+/**
+ * Run the packaged launcher with `--backend-only` on free ports. When the test
+ * ends it is stopped as a user would stop it, and anything it left behind is
+ * reaped.
+ */
 async function launchPackagedApp(
   app: PackagedApp,
   env: Record<string, string> = {},
@@ -1823,27 +1772,39 @@ async function launchPackagedApp(
   });
   const exited = once(child, "exit").then(([code]) => code as number | null);
 
-  return {
-    child,
-    ports,
-    output: () => output,
-    exited,
-    /** Stop the launcher as a user would, and reap anything it left behind. */
-    async stop() {
-      if (child.exitCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([exited, delay(10_000)]);
+  onTestFinished(async () => {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await Promise.race([exited, delay(10_000)]);
+    }
+    if (child.exitCode === null) child.kill("SIGKILL");
+    for (const { pid } of app.uvxRecords()) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // Already stopped by the launcher, which is the expected path.
       }
-      if (child.exitCode === null) child.kill("SIGKILL");
-      for (const { pid } of app.uvxRecords()) {
-        try {
-          process.kill(-pid, "SIGKILL");
-        } catch {
-          // Already stopped by the launcher, which is the expected path.
-        }
-      }
+    }
+  }, 20_000);
+
+  return { child, ports, output: () => output, exited };
+}
+
+type PackagedLaunch = Awaited<ReturnType<typeof launchPackagedApp>>;
+
+/** What `find` returns once it finds something, within 15 s. */
+function eventually<T>(
+  launch: PackagedLaunch,
+  find: () => T | false | null | undefined,
+) {
+  return vi.waitFor(
+    () => {
+      const found = find();
+      if (!found) throw new Error(`Not yet. Output:\n${launch.output()}`);
+      return found;
     },
-  };
+    { timeout: 15_000, interval: 50 },
+  );
 }
 
 describe.skipIf(process.platform === "win32")(
@@ -1854,27 +1815,6 @@ describe.skipIf(process.platform === "win32")(
     const forkSource = {
       sources: { agentServerGitRepo: forkRepo, agentServerGitRef: commitSha },
     };
-    const apps: PackagedApp[] = [];
-
-    afterEach(() => {
-      for (const app of apps.splice(0)) {
-        rmSync(app.root, { recursive: true, force: true });
-      }
-    });
-
-    function packagedApp(
-      launcherDefaults:
-        | Record<string, unknown>
-        | ((root: string) => Record<string, unknown>),
-    ) {
-      const app = createPackagedApp(
-        typeof launcherDefaults === "function"
-          ? launcherDefaults
-          : () => launcherDefaults,
-      );
-      apps.push(app);
-      return app;
-    }
 
     const withSetup = (root: string) => ({
       setup: {
@@ -1885,233 +1825,211 @@ describe.skipIf(process.platform === "win32")(
     const setupFailure = (root: string, clause: string) =>
       `Setup command \`${setupStubCommand(root).join(" ")}\` failed (exit 2) ${clause} Its output is in the startup log.`;
 
-    const isListening = (port: number) =>
-      new Promise<boolean>((resolve) => {
-        const socket = net.connect(port, "127.0.0.1");
-        socket.once("connect", () => {
-          socket.destroy();
-          resolve(true);
-        });
-        socket.once("error", () => resolve(false));
-      });
-
-    const agentServerStart = (app: PackagedApp) =>
+    const started = (app: PackagedApp, service: UvxRecord["service"]) =>
       app
         .uvxRecords()
         .find(
-          (record) =>
-            record.service === "agent-server" && record.kind === "start",
+          (record) => record.service === service && record.kind === "start",
         );
 
     it("a packaged build starts the agent-server its defaults.json names", async () => {
-      const app = packagedApp(forkSource);
+      const app = createPackagedApp(forkSource);
       const launch = await launchPackagedApp(app);
 
-      try {
-        expect(
-          await waitUntil(() => agentServerStart(app) !== undefined),
-          launch.output(),
-        ).toBe(true);
+      const agentServer = await eventually(launch, () =>
+        started(app, "agent-server"),
+      );
 
-        const gitUrl = `git+${forkRepo}@${commitSha}`;
-        expect(agentServerStart(app)?.argv).toEqual([
-          "--from",
-          `${gitUrl}#subdirectory=openhands-agent-server`,
-          "--with",
-          `${gitUrl}#subdirectory=openhands-sdk`,
-          "--with",
-          `${gitUrl}#subdirectory=openhands-tools`,
-          "--with",
-          `${gitUrl}#subdirectory=openhands-workspace`,
-          "--with",
-          "posthog>=6,<7",
-          "agent-server",
-          "--import-modules",
-          "canvas_ui_tool",
-          "--host",
-          "127.0.0.1",
-          "--port",
-          String(launch.ports.agentServer),
-        ]);
-        expect(launch.output()).toContain(
-          `Using git (example/agent-sdk-fork@${commitSha})`,
-        );
-        expect(launch.output()).toContain(
-          "From config/defaults.json: OH_AGENT_SERVER_GIT_REF, OH_AGENT_SERVER_GIT_REPO",
-        );
-      } finally {
-        await launch.stop();
-      }
+      const gitUrl = `git+${forkRepo}@${commitSha}`;
+      expect(agentServer.argv).toEqual([
+        "--from",
+        `${gitUrl}#subdirectory=openhands-agent-server`,
+        "--with",
+        `${gitUrl}#subdirectory=openhands-sdk`,
+        "--with",
+        `${gitUrl}#subdirectory=openhands-tools`,
+        "--with",
+        `${gitUrl}#subdirectory=openhands-workspace`,
+        "--with",
+        "posthog>=6,<7",
+        "agent-server",
+        "--import-modules",
+        "canvas_ui_tool",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(launch.ports.agentServer),
+      ]);
+      expect(launch.output()).toContain(
+        `Using git (example/agent-sdk-fork@${commitSha})`,
+      );
+      expect(launch.output()).toContain(
+        "From config/defaults.json: OH_AGENT_SERVER_GIT_REF, OH_AGENT_SERVER_GIT_REPO",
+      );
     }, 30_000);
 
     it("the environment still wins over defaults.json", async () => {
-      const app = packagedApp(forkSource);
+      const app = createPackagedApp(forkSource);
       const launch = await launchPackagedApp(app, {
         OH_AGENT_SERVER_VERSION: "1.18.0",
       });
 
-      try {
-        expect(
-          await waitUntil(() => agentServerStart(app) !== undefined),
-          launch.output(),
-        ).toBe(true);
+      const { argv = [] } = await eventually(launch, () =>
+        started(app, "agent-server"),
+      );
 
-        const { argv = [] } = agentServerStart(app) ?? {};
-        expect(argv.slice(0, 2)).toEqual([
-          "--from",
-          "openhands-agent-server==1.18.0",
-        ]);
-        expect(argv.join(" ")).not.toContain(forkRepo);
-        expect(launch.output()).toContain("Using PyPI (1.18.0)");
-      } finally {
-        await launch.stop();
-      }
+      expect(argv.slice(0, 2)).toEqual([
+        "--from",
+        "openhands-agent-server==1.18.0",
+      ]);
+      expect(argv.join(" ")).not.toContain(forkRepo);
+      expect(launch.output()).toContain("Using PyPI (1.18.0)");
     }, 30_000);
 
     it("the state directory and key files named by defaults.json are used", async () => {
-      const app = packagedApp({
+      const app = createPackagedApp({
         paths: {
-          ...JSON.parse(
-            readFileSync(
-              path.join(repoRoot, "config", "defaults.json"),
-              "utf8",
-            ),
-          ).paths,
+          ...REPO_DEFAULTS.paths,
           stateDir: "~/.example-app/agent-canvas",
         },
       });
       const launch = await launchPackagedApp(app);
 
-      try {
-        expect(
-          await waitUntil(() => agentServerStart(app) !== undefined),
-          launch.output(),
-        ).toBe(true);
+      const agentServer = await eventually(launch, () =>
+        started(app, "agent-server"),
+      );
 
-        const stateDir = path.join(app.home, ".example-app", "agent-canvas");
-        const sessionKey = readFileSync(
-          path.join(stateDir, "api-key.txt"),
-          "utf8",
-        ).trim();
-        expect(existsSync(path.join(stateDir, "secret-key.txt"))).toBe(true);
-        expect(agentServerStart(app)?.env).toEqual({
-          OH_PERSISTENCE_DIR: path.join(app.home, ".example-app"),
-          OH_SESSION_API_KEYS_0: sessionKey,
-        });
-        expect(existsSync(path.join(app.home, ".openhands"))).toBe(false);
-      } finally {
-        await launch.stop();
-      }
+      const stateDir = path.join(app.home, ".example-app", "agent-canvas");
+      const sessionKey = readFileSync(
+        path.join(stateDir, "api-key.txt"),
+        "utf8",
+      ).trim();
+      expect(existsSync(path.join(stateDir, "secret-key.txt"))).toBe(true);
+      expect(agentServer.env).toEqual({
+        OH_PERSISTENCE_DIR: path.join(app.home, ".example-app"),
+        OH_SESSION_API_KEYS_0: sessionKey,
+      });
+      expect(existsSync(path.join(app.home, ".openhands"))).toBe(false);
     }, 30_000);
+
+    it("fails at once, with the exit code and last output, when the agent-server exits before answering", async () => {
+      // A uvx that fails at once (no network, a bad ref) must not leave the
+      // launcher waiting out its readiness timeout: 60 s here, 10 minutes in
+      // the desktop app.
+      const app = createPackagedApp({});
+      const launch = await launchPackagedApp(app, {
+        UVX_STUB_AGENT_SERVER_FAILS: "1",
+      });
+
+      expect(
+        await Promise.race([
+          launch.exited,
+          delay(20_000).then(() => "still running"),
+        ]),
+        launch.output(),
+      ).toBe(1);
+      const failure =
+        "agent-server exited before startup completed (code=3, signal=null). Last output:";
+      expect(launch.output()).toContain(failure);
+      const lastOutput = launch
+        .output()
+        .slice(launch.output().indexOf(failure));
+      expect(lastOutput).toContain("Resolving openhands-agent-server");
+      expect(lastOutput).toContain(
+        "error: Failed to fetch: network unreachable",
+      );
+    }, 30_000);
+
     it("runs before-start before the agent-server and after-ready once it answers", async () => {
-      const app = packagedApp(withSetup);
+      const app = createPackagedApp(withSetup);
       const launch = await launchPackagedApp(app);
 
-      try {
-        const automationStart = () =>
-          app
-            .uvxRecords()
-            .find(
-              (record) =>
-                record.service === "automation" && record.kind === "start",
-            );
-        expect(
-          await waitUntil(() => automationStart() !== undefined),
-          launch.output(),
-        ).toBe(true);
+      const automation = await eventually(launch, () =>
+        started(app, "automation"),
+      );
 
-        const [beforeStart, afterReady, ...rest] = app.setupRecords();
-        expect(rest).toEqual([]);
-        expect(beforeStart.phase).toBe("before-start");
-        expect(afterReady.phase).toBe("after-ready");
+      const [beforeStart, afterReady, ...rest] = app.setupRecords();
+      expect(rest).toEqual([]);
+      expect(beforeStart.phase).toBe("before-start");
+      expect(afterReady.phase).toBe("after-ready");
 
-        const records = app.uvxRecords();
-        const agentServer = records.find(
-          (record) =>
-            record.service === "agent-server" && record.kind === "start",
-        )!;
-        const firstServerInfo = records.find(
+      const agentServer = started(app, "agent-server")!;
+      const firstServerInfo = app
+        .uvxRecords()
+        .find(
           (record) =>
             record.service === "agent-server" && record.url === "/server_info",
         )!;
-        expect(beforeStart.time).toBeLessThan(agentServer.time);
-        expect(afterReady.time).toBeGreaterThan(firstServerInfo.time);
-        expect(afterReady.time).toBeLessThan(automationStart()!.time);
+      expect(beforeStart.time).toBeLessThan(agentServer.time);
+      expect(afterReady.time).toBeGreaterThan(firstServerInfo.time);
+      expect(afterReady.time).toBeLessThan(automation.time);
 
-        const stateDir = realpathSync(
-          path.join(app.home, ".openhands", "agent-canvas"),
-        );
-        for (const record of [beforeStart, afterReady]) {
-          expect(record.cwd).toBe(stateDir);
-          expect(record.env).toMatchObject({
-            OH_CANVAS_SAFE_STATE_DIR: stateDir,
-            OH_PERSISTENCE_DIR: path.dirname(stateDir),
-          });
-        }
-        expect(beforeStart.env).not.toHaveProperty("AGENT_SERVER_URL");
-        expect(beforeStart.env).not.toHaveProperty("SESSION_API_KEY");
-        expect(afterReady.env).toMatchObject({
-          AGENT_SERVER_URL: `http://127.0.0.1:${launch.ports.agentServer}`,
-          SESSION_API_KEY: agentServer.env?.OH_SESSION_API_KEYS_0,
+      const stateDir = realpathSync(
+        path.join(app.home, ".openhands", "agent-canvas"),
+      );
+      for (const record of [beforeStart, afterReady]) {
+        expect(record.cwd).toBe(stateDir);
+        expect(record.env).toMatchObject({
+          OH_CANVAS_SAFE_STATE_DIR: stateDir,
+          OH_PERSISTENCE_DIR: path.dirname(stateDir),
         });
-        expect(launch.output()).toContain("example setup: before-start");
-        expect(launch.output()).toContain("example setup: after-ready");
-      } finally {
-        await launch.stop();
       }
+      expect(beforeStart.env).not.toHaveProperty("AGENT_SERVER_URL");
+      expect(beforeStart.env).not.toHaveProperty("SESSION_API_KEY");
+      expect(afterReady.env).toMatchObject({
+        AGENT_SERVER_URL: `http://127.0.0.1:${launch.ports.agentServer}`,
+        SESSION_API_KEY: agentServer.env?.OH_SESSION_API_KEYS_0,
+      });
+      expect(launch.output()).toContain("example setup: before-start");
+      expect(launch.output()).toContain("example setup: after-ready");
     }, 30_000);
 
     it("a failing before-start setup stops the launch before any service starts", async () => {
-      const app = packagedApp(withSetup);
+      const app = createPackagedApp(withSetup);
       const launch = await launchPackagedApp(app, {
         SETUP_STUB_FAIL_PHASE: "before-start",
       });
 
-      try {
-        expect(await launch.exited).toBe(1);
-        expect(launch.output()).toContain(
-          setupFailure(app.root, "before the stack started."),
-        );
-        expect(launch.output()).toContain("example setup: before-start");
-        expect(app.uvxRecords()).toEqual([]);
-      } finally {
-        await launch.stop();
-      }
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        setupFailure(app.root, "before the stack started."),
+      );
+      expect(launch.output()).toContain("example setup: before-start");
+      expect(app.uvxRecords()).toEqual([]);
     }, 30_000);
 
     it("a failing after-ready setup stops the agent-server and fails the launch", async () => {
-      const app = packagedApp(withSetup);
+      const app = createPackagedApp(withSetup);
       const launch = await launchPackagedApp(app, {
         SETUP_STUB_FAIL_PHASE: "after-ready",
       });
 
-      try {
-        expect(await launch.exited).toBe(1);
-        expect(launch.output()).toContain(
-          setupFailure(
-            app.root,
-            "after the agent-server started; the stack was stopped.",
-          ),
-        );
-        expect(app.setupRecords().map((record) => record.phase)).toEqual([
-          "before-start",
-          "after-ready",
-        ]);
-        expect(await isListening(launch.ports.agentServer)).toBe(false);
-        expect(
-          app.uvxRecords().some((record) => record.service === "automation"),
-        ).toBe(false);
-      } finally {
-        await launch.stop();
-      }
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        setupFailure(
+          app.root,
+          "after the agent-server started; the stack was stopped.",
+        ),
+      );
+      expect(app.setupRecords().map((record) => record.phase)).toEqual([
+        "before-start",
+        "after-ready",
+      ]);
+      expect(await isPortBusy(launch.ports.agentServer)).toBe(false);
+      expect(
+        app.uvxRecords().some((record) => record.service === "automation"),
+      ).toBe(false);
     }, 30_000);
 
-    /** The pids a setup command printed on one line, once it has. */
-    const printedPids = (output: string, phase: string) =>
-      output
-        .match(new RegExp(`\\[setup ${phase}\\]\\S* ([\\d ]+)$`, "m"))?.[1]
-        .split(" ")
-        .map(Number);
+    /** The pids a setup command prints on one line, once it has. */
+    const printedPids = (launch: PackagedLaunch, phase: string) =>
+      eventually(launch, () =>
+        launch
+          .output()
+          .match(new RegExp(`\\[setup ${phase}\\]\\S* ([\\d ]+)$`, "m"))?.[1]
+          .split(" ")
+          .map(Number),
+      );
 
     it.each([
       ["before-start", "obeys", ""],
@@ -2120,58 +2038,38 @@ describe.skipIf(process.platform === "win32")(
       "quitting while %s waits on a background child that %s SIGTERM stops the child and ends the launch there",
       async (phase, _, trap) => {
         const command = ["sh", "-c", `${trap}sleep 300 & echo $$ $!`];
-        const app = packagedApp({ setup: { command, phases: [phase] } });
+        const app = createPackagedApp({ setup: { command, phases: [phase] } });
         const launch = await launchPackagedApp(app);
-        let child: number | undefined;
+        const [shell, child] = await printedPids(launch, phase);
+        killAtEnd(child);
+        await eventually(launch, () => hasExited(shell));
+        expect(hasExited(child)).toBe(false);
 
-        try {
-          expect(
-            await waitUntil(() => !!printedPids(launch.output(), phase)),
-            launch.output(),
-          ).toBe(true);
-          let shell: number;
-          [shell, child] = printedPids(launch.output(), phase)!;
-          expect(await waitUntil(() => hasExited(shell))).toBe(true);
-          expect(hasExited(child)).toBe(false);
+        launch.child.kill("SIGTERM");
 
-          launch.child.kill("SIGTERM");
-
-          expect(await launch.exited).toBe(0);
-          await expect
-            .poll(() => hasExited(child!), { timeout: 5_000 })
-            .toBe(true);
-          expect(launch.output()).not.toContain("Done in");
-        } finally {
-          await launch.stop();
-          if (child && !hasExited(child)) process.kill(child, "SIGKILL");
-        }
+        expect(await launch.exited).toBe(0);
+        await expect
+          .poll(() => hasExited(child), { timeout: 5_000 })
+          .toBe(true);
+        expect(launch.output()).not.toContain("Done in");
       },
       30_000,
     );
 
     it("quitting after a phase has finished signals nothing to its process group", async () => {
       const command = ["sh", "-c", "sleep 300 > /dev/null 2>&1 & echo $!"];
-      const app = packagedApp({
+      const app = createPackagedApp({
         setup: { command, phases: ["before-start"] },
       });
       const launch = await launchPackagedApp(app);
-      let child: number | undefined;
+      await eventually(launch, () => started(app, "agent-server"));
+      const [child] = await printedPids(launch, "before-start");
+      killAtEnd(child);
 
-      try {
-        expect(
-          await waitUntil(() => agentServerStart(app) !== undefined),
-          launch.output(),
-        ).toBe(true);
-        [child] = printedPids(launch.output(), "before-start")!;
+      launch.child.kill("SIGTERM");
 
-        launch.child.kill("SIGTERM");
-
-        expect(await launch.exited).toBe(0);
-        expect(hasExited(child)).toBe(false);
-      } finally {
-        await launch.stop();
-        if (child && !hasExited(child)) process.kill(child, "SIGKILL");
-      }
+      expect(await launch.exited).toBe(0);
+      expect(hasExited(child)).toBe(false);
     }, 30_000);
 
     it("quitting while a phase waits on a background child that left its process group still exits within 6 s", async () => {
@@ -2180,51 +2078,36 @@ describe.skipIf(process.platform === "win32")(
         "-e",
         'const child = require("node:child_process").spawn("sleep", ["300"], { detached: true, stdio: "inherit" }); child.unref(); console.log(process.pid, child.pid);',
       ];
-      const app = packagedApp({
+      const app = createPackagedApp({
         setup: { command, phases: ["before-start"] },
       });
       const launch = await launchPackagedApp(app);
-      let child: number | undefined;
+      const [leader, child] = await printedPids(launch, "before-start");
+      killAtEnd(child);
+      await eventually(launch, () => hasExited(leader));
 
-      try {
-        expect(
-          await waitUntil(() => !!printedPids(launch.output(), "before-start")),
-          launch.output(),
-        ).toBe(true);
-        let leader: number;
-        [leader, child] = printedPids(launch.output(), "before-start")!;
-        expect(await waitUntil(() => hasExited(leader))).toBe(true);
+      launch.child.kill("SIGTERM");
 
-        launch.child.kill("SIGTERM");
-
-        expect(
-          await Promise.race([
-            launch.exited,
-            delay(6_000).then(() => "still running"),
-          ]),
-        ).toBe(0);
-      } finally {
-        await launch.stop();
-        if (child && !hasExited(child)) process.kill(child, "SIGKILL");
-      }
+      expect(
+        await Promise.race([
+          launch.exited,
+          delay(6_000).then(() => "still running"),
+        ]),
+      ).toBe(0);
     }, 30_000);
 
     it("a malformed setup in defaults.json fails the launch before anything runs", async () => {
-      const app = packagedApp({
+      const app = createPackagedApp({
         setup: { command: "example-app setup", phases: ["before-start"] },
       });
       const launch = await launchPackagedApp(app);
 
-      try {
-        expect(await launch.exited).toBe(1);
-        expect(launch.output()).toContain(
-          'setup.command in config/defaults.json must be a non-empty array of non-empty strings, got: "example-app setup"',
-        );
-        expect(app.uvxRecords()).toEqual([]);
-        expect(app.setupRecords()).toEqual([]);
-      } finally {
-        await launch.stop();
-      }
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        'setup.command in config/defaults.json must be a non-empty array of non-empty strings, got: "example-app setup"',
+      );
+      expect(app.uvxRecords()).toEqual([]);
+      expect(app.setupRecords()).toEqual([]);
     }, 30_000);
   },
 );
