@@ -168,7 +168,7 @@ describe("ConversationAppPanel", () => {
           throw new Error("The overview could not load.");
         });
         host.registerPage("details", ({ container }) => {
-          container.textContent = "details mounted";
+          container.append("details mounted");
         });
       },
     });
