@@ -4,6 +4,7 @@ import { useGoalInterceptor } from "#/hooks/chat/use-goal-interceptor";
 import { useModelInterceptor } from "#/hooks/chat/use-model-interceptor";
 import { usePlanModeInterceptor } from "#/hooks/chat/use-plan-mode-interceptor";
 import { useChatAttachmentUpload } from "#/hooks/chat/use-chat-attachment-upload";
+import { useConversationAgentControls } from "#/hooks/chat/use-agent-controls";
 import { AgentState } from "#/types/agent-state";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
 import { useOptionalConversationId } from "#/hooks/use-conversation-id";
@@ -44,6 +45,7 @@ export function InteractiveChatBox({
     );
 
   const { handleUpload } = useChatAttachmentUpload();
+  const agentControls = useConversationAgentControls(conversationId);
 
   const handleAfterGoal = useBtwInterceptor(conversationId, (message) => {
     const { imagesToEmbed, imagesAsFiles } = partitionImagesForUpload(
@@ -81,6 +83,7 @@ export function InteractiveChatBox({
         hasStartedConversation={hasStartedConversation}
         onSubmit={handleSubmit}
         onFilesPaste={handleUpload}
+        agentControls={agentControls}
       />
       <div className="mt-3 pb-3">
         <GitControlBar onSuggestionsClick={handleSuggestionsClick} />

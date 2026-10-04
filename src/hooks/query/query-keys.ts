@@ -93,6 +93,12 @@ export const CANVAS_EXTENSIONS_QUERY_KEYS = {
     ] as const,
 } as const;
 
+export const ACP_SESSION_CONTROLS_QUERY_KEYS = {
+  all: ["acp-session-controls"] as const,
+  latest: (backendId: string, conversationId: string) =>
+    ["acp-session-controls", "latest", backendId, conversationId] as const,
+} as const;
+
 export const SETUP_QUERY_KEYS = {
   /** What the deployment supports. The same answer for every setup entry. */
   capabilities: () => ["setup-capabilities"] as const,

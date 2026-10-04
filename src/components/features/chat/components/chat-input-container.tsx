@@ -7,6 +7,8 @@ import { SlashCommandMenu } from "./slash-command-menu";
 import { useConversationStore } from "#/stores/conversation-store";
 import { cn } from "#/utils/utils";
 import { SlashCommandItem } from "#/hooks/chat/use-slash-command";
+import type { AgentControls } from "#/hooks/chat/use-agent-controls";
+import { ChatInputAgentOptions } from "./chat-input-agent-options";
 
 interface ChatInputContainerProps {
   chatContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -33,6 +35,7 @@ interface ChatInputContainerProps {
   slashItems?: SlashCommandItem[];
   slashSelectedIndex?: number;
   onSlashSelect?: (item: SlashCommandItem) => void;
+  agentControls?: AgentControls;
 }
 
 export function ChatInputContainer({
@@ -60,6 +63,7 @@ export function ChatInputContainer({
   slashItems = [],
   slashSelectedIndex = 0,
   onSlashSelect,
+  agentControls,
 }: ChatInputContainerProps) {
   const conversationMode = useConversationStore(
     (state) => state.conversationMode,
@@ -80,6 +84,10 @@ export function ChatInputContainer({
       {isDragOver && <DragOver />}
 
       <UploadedFiles />
+
+      {agentControls ? (
+        <ChatInputAgentOptions controls={agentControls} disabled={disabled} />
+      ) : null}
 
       {/* Wrapper so the slash menu anchors just above the input row,
           not above the entire (possibly resized) container */}

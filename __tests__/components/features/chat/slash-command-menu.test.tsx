@@ -126,6 +126,28 @@ describe("SlashCommandMenu", () => {
   });
 });
 
+// @spec ASC-005 — Stable test ids for agent controls
+describe("SlashCommandMenu - agent commands", () => {
+  it("shows an agent command's input hint in its row, and no hint for commands without input", () => {
+    renderWithProviders(
+      <SlashCommandMenu
+        items={[
+          { ...makeItem("compare", "/compare"), inputHint: "what to compare" },
+          makeItem("summarize", "/summarize"),
+        ]}
+        selectedIndex={0}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const [compare, summarize] = screen.getAllByTestId("slash-command-item");
+    expect(compare).toHaveAttribute("data-command", "/compare");
+    expect(compare).toHaveTextContent("‹what to compare›");
+    expect(summarize).toHaveAttribute("data-command", "/summarize");
+    expect(screen.getAllByTestId("slash-command-hint")).toHaveLength(1);
+  });
+});
+
 describe("getSkillDescription", () => {
   it("extracts description from YAML frontmatter", () => {
     const content =
@@ -177,9 +199,7 @@ describe("getSkillDescription", () => {
   it("strips markdown from frontmatter description", () => {
     const content =
       '---\ndescription: "A **bold** and *italic* description"\n---\nBody.';
-    expect(getSkillDescription(content)).toBe(
-      "A bold and italic description",
-    );
+    expect(getSkillDescription(content)).toBe("A bold and italic description");
   });
 
   it("strips markdown from body fallback", () => {

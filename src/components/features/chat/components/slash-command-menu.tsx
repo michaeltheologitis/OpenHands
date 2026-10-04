@@ -99,12 +99,15 @@ function SlashCommandMenuItem({
     return null;
   }, [item.skill]);
 
+  // @spec ASC-005 — Stable test ids for agent controls
   return (
     <button
       role="option"
       aria-selected={isSelected}
       ref={ref}
       type="button"
+      data-testid="slash-command-item"
+      data-command={item.command}
       className={cn(
         "w-full px-3 py-2.5 text-left",
         dropdownInstantColorClassName,
@@ -116,7 +119,14 @@ function SlashCommandMenuItem({
         onSelect(item);
       }}
     >
-      <Text className="font-normal">{item.command}</Text>
+      <Text className="font-normal">
+        {item.command}
+        {item.inputHint ? (
+          <span data-testid="slash-command-hint" className="ml-2 text-muted">
+            ‹{item.inputHint}›
+          </span>
+        ) : null}
+      </Text>
       {description && (
         <Text className="text-xs text-muted mt-0.5 truncate block">
           {description}
