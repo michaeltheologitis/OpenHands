@@ -1,4 +1,5 @@
 // Export all event types
+export * from "./acp-session-controls-event";
 export * from "./acp-subagent-event";
 export * from "./acp-tool-call-event";
 export * from "./action-event";

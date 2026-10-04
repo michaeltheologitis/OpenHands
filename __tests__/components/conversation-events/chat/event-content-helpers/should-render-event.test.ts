@@ -308,3 +308,18 @@ describe("shouldRenderEvent - /goal loop re-prompts", () => {
     ).toBe(false);
   });
 });
+
+describe("shouldRenderEvent - ACP session controls", () => {
+  it("never renders the agent's commands and options report", () => {
+    const event = {
+      id: "controls-1",
+      kind: "ACPSessionControlsEvent",
+      timestamp: "2026-10-01T00:00:00Z",
+      source: "agent",
+      available_commands: [{ name: "summarize", description: "Summarize" }],
+      config_options: [],
+    } as OpenHandsEvent;
+
+    expect(shouldRenderEvent(event)).toBe(false);
+  });
+});

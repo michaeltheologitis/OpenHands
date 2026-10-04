@@ -19,6 +19,7 @@ import {
   PauseEvent,
   ServerErrorEvent,
   StreamingDeltaEvent,
+  ACPSessionControlsEvent,
 } from "./events/index";
 
 /**
@@ -50,4 +51,6 @@ export type OpenHandsEvent =
   // Control events
   | PauseEvent
   | ServerErrorEvent
-  | StreamingDeltaEvent;
+  | StreamingDeltaEvent
+  // ACP session controls (slash commands and config options; never rendered)
+  | ACPSessionControlsEvent;
