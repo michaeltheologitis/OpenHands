@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { LoaderCircle } from "lucide-react";
+import { Check, LoaderCircle, Square } from "lucide-react";
 import ArrowDown from "#/icons/angle-down-solid.svg?react";
 import ArrowUp from "#/icons/angle-up-solid.svg?react";
 import { I18nKey } from "#/i18n/declaration";
@@ -78,6 +78,20 @@ export const SubagentRow = React.memo(function SubagentRow({
             <LoaderCircle
               data-testid="spinner-icon"
               className="h-4 w-4 flex-shrink-0 animate-spin"
+            />
+          )}
+          {status.category === "done" && (
+            <Check
+              data-testid="subagent-done-icon"
+              className="h-4 w-4 flex-shrink-0"
+              aria-hidden
+            />
+          )}
+          {status.category === "stopped" && (
+            <Square
+              data-testid="subagent-stopped-icon"
+              className="h-3 w-3 flex-shrink-0"
+              aria-hidden
             />
           )}
           <span data-testid="subagent-status" className="flex-shrink-0">

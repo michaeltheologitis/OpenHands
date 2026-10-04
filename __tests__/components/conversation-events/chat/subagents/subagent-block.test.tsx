@@ -195,6 +195,32 @@ describe("sub-agents under the call that spawned them", () => {
     ).not.toBeInTheDocument();
   });
 
+  // @spec SUB-005 — Each sub-agent shows its latest state; an unconfirmed state never shows a spinner
+  it.each([
+    ["running", undefined, "spinner-icon"],
+    ["idle", "end_turn", "subagent-done-icon"],
+    ["idle", "cancelled", "subagent-stopped-icon"],
+    ["requires_action", undefined, null],
+    ["idle", "max_tokens", null],
+  ])(
+    "marks a %s / %s child with %s beside its status",
+    async (state, stopReason, icon) => {
+      const cell = call(1, "c1");
+      seed(cell, child(2, "n2", { cell: "c1", state, stopReason }));
+      renderCell(cell);
+      await user.click(screen.getByTestId("subagent-block-toggle"));
+
+      const toggle = within(rowOf("n2")).getByTestId("subagent-row-toggle");
+      const icons = [
+        "spinner-icon",
+        "subagent-done-icon",
+        "subagent-stopped-icon",
+      ].filter((testId) => within(toggle).queryByTestId(testId));
+
+      expect(icons).toEqual(icon ? [icon] : []);
+    },
+  );
+
   it("shows a child's task first and its answer last", async () => {
     const cell = call(1, "c1");
     seed(
