@@ -128,12 +128,11 @@ describe("DeleteProfileModal", () => {
       expect(ProfilesService.deleteProfile).toHaveBeenCalledWith(
         "profile-to-delete",
       );
+      expect(toastHandlers.displaySuccessToast).toHaveBeenCalledWith(
+        'Profile "profile-to-delete" deleted',
+      );
+      expect(handleClose).toHaveBeenCalled();
     });
-
-    expect(toastHandlers.displaySuccessToast).toHaveBeenCalledWith(
-      'Profile "profile-to-delete" deleted',
-    );
-    expect(handleClose).toHaveBeenCalled();
   });
 
   it("shows error toast on delete failure", async () => {
