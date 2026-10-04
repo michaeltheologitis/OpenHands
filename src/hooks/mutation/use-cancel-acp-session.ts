@@ -4,6 +4,7 @@ import type { CancelAcpSessionResponse } from "@openhands/typescript-client";
 import EventService from "#/api/event-service/event-service.api";
 import { isSdkHttpError } from "#/api/agent-server-compatibility";
 import { I18nKey } from "#/i18n/declaration";
+import { getApiErrorBody } from "#/utils/api-error-message";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 
 export interface CancelAcpSessionVariables {
@@ -23,11 +24,12 @@ const STATUS_PREFIX = /^\d{3}: /;
  */
 function refusalReason(error: unknown): string | null {
   if (!isSdkHttpError(error)) return null;
-  const { status, response } = error as { status: number; response?: unknown };
-  if (typeof response !== "object" || response === null) return null;
-  const body = response as Record<string, unknown>;
-  const reason =
-    status >= FIRST_SERVER_ERROR_STATUS ? body.exception : body.detail;
+  const { detail, exception } = (getApiErrorBody(error) ?? {}) as {
+    detail?: unknown;
+    exception?: unknown;
+  };
+  const { status } = error as { status: number };
+  const reason = status >= FIRST_SERVER_ERROR_STATUS ? exception : detail;
   return typeof reason === "string" && reason
     ? reason.replace(STATUS_PREFIX, "")
     : null;
