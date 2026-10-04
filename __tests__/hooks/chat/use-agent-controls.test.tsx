@@ -92,7 +92,7 @@ const gatewayTimeout = Object.assign(
   ),
   { name: "HttpError", status: 504, response: gatewayTimeoutBody },
 );
-// Not a refusal either: only a 422 carries the agent's sentence.
+// An answer the set route refused, as the TypeScript client throws it.
 const answered = (status: number, statusText: string, detail: string) =>
   new HttpError(
     status,
@@ -130,6 +130,7 @@ describe("useConversationAgentControls", () => {
     setActiveSelection({ backendId: LOCAL.id });
     conversation.data = { agent_kind: "acp" };
     vi.mocked(localAgentServerHasCapability).mockReturnValue(true);
+    vi.mocked(displayErrorToast).mockClear();
     vi.spyOn(EventService, "searchEvents").mockResolvedValue({
       items: [controlsEvent],
       next_page_id: null,
@@ -261,6 +262,33 @@ describe("useConversationAgentControls", () => {
       expect(displayErrorToast).toHaveBeenCalledWith(
         "profile is fixed once the session has started (it is 'fast')",
       ),
+    );
+  });
+
+  // A set can take up to 30 s; the picker may be gone by then.
+  it("still reports a failed pick when the composer unmounts before the agent answers", async () => {
+    let refuse: (error: Error) => void = () => undefined;
+    vi.spyOn(
+      AgentServerConversationService,
+      "setAcpConfigOption",
+    ).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          refuse = reject;
+        }),
+    );
+    const { result, unmount } = renderControls();
+    await waitFor(() => expect(result.current.options).toHaveLength(1));
+    act(() => result.current.setOption("profile", "thorough"));
+    await waitFor(() =>
+      expect(result.current.pendingValues).toEqual({ profile: "thorough" }),
+    );
+
+    unmount();
+    refuse(answered(422, "Unprocessable Entity", "profile is fixed"));
+
+    await waitFor(() =>
+      expect(displayErrorToast).toHaveBeenCalledWith("profile is fixed"),
     );
   });
 

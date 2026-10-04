@@ -23,8 +23,6 @@ import { useLatestAcpSessionControls } from "#/hooks/query/use-latest-acp-sessio
 import { useAcpModelContext } from "#/hooks/use-acp-model-context";
 import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
 import { getApiErrorMessage } from "#/utils/api-error-message";
-import { displayErrorToast } from "#/utils/custom-toast-handlers";
-import { retrieveAxiosErrorMessage } from "#/utils/retrieve-axios-error-message";
 
 export type { HomeLaunchContext };
 
@@ -138,17 +136,7 @@ export function useConversationAgentControls(
     rejection: null,
     isLoading: !event,
     setOption: (configId, value) =>
-      setConfigOption.mutate(
-        { conversationId, configId, value },
-        {
-          onError: (error) =>
-            displayErrorToast(
-              isSdkHttpStatusError(error, AGENT_REFUSAL_STATUS)
-                ? getApiErrorMessage(error, error.message)
-                : retrieveAxiosErrorMessage(error),
-            ),
-        },
-      ),
+      setConfigOption.mutate({ conversationId, configId, value }),
   };
 }
 
