@@ -21,86 +21,8 @@ export interface PlacementResult {
   needsOlderHistory: boolean;
 }
 
-type Entry = [sessionId: string, record: SubagentRecord];
-
 /** What a parent with no anchored children renders; one shared reference. */
 export const NO_SUBAGENT_ANCHORS: readonly SubagentAnchor[] = [];
-
-const byFirstAt = ([, a]: Entry, [, b]: Entry) =>
-  compareTimestamps(a.firstAt, b.firstAt);
-
-const byAt = (a: SubagentAnchor, b: SubagentAnchor) =>
-  compareTimestamps(a.at, b.at);
-
-const append = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
-  const list = map.get(key);
-  if (list) list.push(value);
-  else map.set(key, [value]);
-};
-
-/**
- * The parent is loaded, and walking up from it never comes back around. A
- * missing session further up sets apart only its own child, not this one.
- */
-const hasPlaceableAncestry = (
-  sessionId: string,
-  parent: SessionRef,
-  children: SubagentRecords["children"],
-) => {
-  const seen = new Set([sessionId]);
-  let current = parent;
-  while (current !== ROOT_SESSION) {
-    const record = children.get(current);
-    if (!record) return current !== parent;
-    if (seen.has(current)) return false;
-    seen.add(current);
-    current = toSessionRef(record.latest.parent_session_id);
-  }
-  return true;
-};
-
-/**
- * Where a child goes when it is in no call: at its parent's message to it,
- * else at its announcement.
- */
-const fallbackAnchor = (
-  [sessionId, record]: Entry,
-  parent: SessionRef,
-  { firstMessageTo, messages }: SubagentRecords,
-): SubagentAnchor => {
-  const key = firstMessageTo.get(routeKey(parent, sessionId));
-  const task = key === undefined ? undefined : messages.get(key);
-  return task
-    ? { sessionId, at: task.firstAt, via: "message" }
-    : { sessionId, at: record.firstAt, via: "announcement" };
-};
-
-/** `previous` when every entry of `next` is the same object, else `next`. */
-const reuseMap = <K, V>(
-  previous: ReadonlyMap<K, V>,
-  next: ReadonlyMap<K, V>,
-): ReadonlyMap<K, V> => {
-  if (previous.size !== next.size) return next;
-  for (const [key, value] of next) {
-    if (previous.get(key) !== value) return next;
-  }
-  return previous;
-};
-
-/** `previous`'s list for each key whose list is equal, and so the map. */
-const reuseLists = <K, V>(
-  previous: ReadonlyMap<K, readonly V[]>,
-  next: Map<K, V[]>,
-): ReadonlyMap<K, readonly V[]> =>
-  reuseMap(
-    previous,
-    new Map(
-      [...next].map(([key, list]) => [
-        key,
-        replaceEqualDeep(previous.get(key), list),
-      ]),
-    ),
-  );
 
 /**
  * Each child goes in the tool call that spawned it, else at its fallback in
@@ -216,3 +138,81 @@ export function unplacedGroups(
     sessionIds,
   }));
 }
+
+type Entry = [sessionId: string, record: SubagentRecord];
+
+/**
+ * The parent is loaded, and walking up from it never comes back around. A
+ * missing session further up sets apart only its own child, not this one.
+ */
+const hasPlaceableAncestry = (
+  sessionId: string,
+  parent: SessionRef,
+  children: SubagentRecords["children"],
+) => {
+  const seen = new Set([sessionId]);
+  let current = parent;
+  while (current !== ROOT_SESSION) {
+    const record = children.get(current);
+    if (!record) return current !== parent;
+    if (seen.has(current)) return false;
+    seen.add(current);
+    current = toSessionRef(record.latest.parent_session_id);
+  }
+  return true;
+};
+
+/**
+ * Where a child goes when it is in no call: at its parent's message to it,
+ * else at its announcement.
+ */
+const fallbackAnchor = (
+  [sessionId, record]: Entry,
+  parent: SessionRef,
+  { firstMessageTo, messages }: SubagentRecords,
+): SubagentAnchor => {
+  const key = firstMessageTo.get(routeKey(parent, sessionId));
+  const task = key === undefined ? undefined : messages.get(key);
+  return task
+    ? { sessionId, at: task.firstAt, via: "message" }
+    : { sessionId, at: record.firstAt, via: "announcement" };
+};
+
+const byFirstAt = ([, a]: Entry, [, b]: Entry) =>
+  compareTimestamps(a.firstAt, b.firstAt);
+
+const byAt = (a: SubagentAnchor, b: SubagentAnchor) =>
+  compareTimestamps(a.at, b.at);
+
+const append = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+};
+
+/** `previous` when every entry of `next` is the same object, else `next`. */
+const reuseMap = <K, V>(
+  previous: ReadonlyMap<K, V>,
+  next: ReadonlyMap<K, V>,
+): ReadonlyMap<K, V> => {
+  if (previous.size !== next.size) return next;
+  for (const [key, value] of next) {
+    if (previous.get(key) !== value) return next;
+  }
+  return previous;
+};
+
+/** `previous`'s list for each key whose list is equal, and so the map. */
+const reuseLists = <K, V>(
+  previous: ReadonlyMap<K, readonly V[]>,
+  next: Map<K, V[]>,
+): ReadonlyMap<K, readonly V[]> =>
+  reuseMap(
+    previous,
+    new Map(
+      [...next].map(([key, list]) => [
+        key,
+        replaceEqualDeep(previous.get(key), list),
+      ]),
+    ),
+  );
