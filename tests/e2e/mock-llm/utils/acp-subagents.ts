@@ -193,6 +193,7 @@ export interface SubagentLink {
 const bySessionId = (a: SubagentLink, b: SubagentLink) =>
   a.sessionId.localeCompare(b.sessionId);
 
+// @spec SUB-011 — The test ids and data attributes of the sub-agent tree are stable
 const COLLAPSED_TOGGLES =
   '[data-testid="subagent-block-toggle"][aria-expanded="false"], ' +
   '[data-testid="subagent-row-toggle"][aria-expanded="false"]';
