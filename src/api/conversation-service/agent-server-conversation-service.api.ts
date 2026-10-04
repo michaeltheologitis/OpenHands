@@ -429,7 +429,6 @@ export interface CreateConversationOptions {
 interface LocalStartConversationRequest {
   /** The body POST /api/conversations takes, without user_id and acp_config_options. */
   payload: Record<string, unknown>;
-  conversationId: string;
   resolvedWorkspaceMode: WorkspaceMode;
 }
 
@@ -449,9 +448,9 @@ function acpConfigOptionsField(values: ACPConfigOptionValues | undefined) {
 }
 
 /**
- * The local half of createConversation: the start body, its new id and the
- * workspace mode. The ACP preview builds its body here too, so the agent it
- * previews is the agent a start would launch.
+ * The body a local start sends for these options, less `user_id` and
+ * `acp_config_options`, and the workspace mode it resolved. Every request
+ * that must launch the agent a start would launch builds its body here.
  */
 async function buildLocalStartConversationRequest(
   options: CreateConversationOptions,
@@ -507,7 +506,7 @@ async function buildLocalStartConversationRequest(
     agentProfileKind,
     titleLlmProfile,
   });
-  return { payload, conversationId, resolvedWorkspaceMode };
+  return { payload, resolvedWorkspaceMode };
 }
 
 class AgentServerConversationService {
