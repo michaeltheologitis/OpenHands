@@ -82,6 +82,27 @@ jobs:
           uv venv .mock-llm-venv
           uv pip install -p .mock-llm-venv "openhands-sdk==$AGENT_SERVER_VERSION"
 
+      - name: Fetch the scripted ACP agent from the pinned SDK
+        # The sub-agent specs run the SDK's scripted ACP agent by path, from
+        # the agent-server source the launchers install: `sources` in
+        # config/defaults.json when set, else the released SDK tag.
+        run: |
+          repo=$(node -p "require('./config/defaults.json').sources?.agentServerGitRepo || ''")
+          ref=$(node -p "require('./config/defaults.json').sources?.agentServerGitRef || ''")
+          if [ -z "$repo" ] || [ -z "$ref" ]; then
+            repo=https://github.com/OpenHands/software-agent-sdk
+            ref="v$(node -p "require('./config/defaults.json').versions.agentServer")"
+          fi
+          git init -q .tmp/sdk
+          git -C .tmp/sdk remote add origin "$repo"
+          git -C .tmp/sdk sparse-checkout set tests/fixtures/acp
+          git -C .tmp/sdk fetch -q --depth 1 origin "$ref"
+          git -C .tmp/sdk checkout -q FETCH_HEAD
+          agent="$PWD/.tmp/sdk/tests/fixtures/acp/scripted_agent.py"
+          test -f "$agent"
+          echo "SCRIPTED_ACP_AGENT=$agent" >> "$GITHUB_ENV"
+          echo "OH_ACP_REPLAY_TRANSCRIPTS=$PWD/tests/e2e/mock-llm/fixtures/acp-subagents/fallback-placement.jsonl" >> "$GITHUB_ENV"
+
       - name: Pre-warm automation backend (uvx cache)
         env:
           AUTOMATION_VERSION: ${{ steps.defaults.outputs.automation_version }}
