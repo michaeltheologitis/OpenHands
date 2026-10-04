@@ -1,7 +1,7 @@
 /**
  * Mock-LLM E2E test: replay recorded ACP streams through the real agent-server
- * and check that the agent-server stored sub-agents and the chat nests every
- * one as it stored it.
+ * and check that the chat nests every sub-agent as the agent-server stored it,
+ * and that a transcript announcing a sub-agent left at least one stored.
  *
  * One test per transcript named by `OH_ACP_REPLAY_TRANSCRIPTS` (paths joined
  * by the platform's path delimiter); skipped when it is unset. Each transcript
@@ -10,6 +10,7 @@
  * played with wait points inferred from their responses.
  */
 
+import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { test, expect } from "@playwright/test";
 import {
@@ -27,6 +28,9 @@ import {
 } from "../utils/acp-subagents";
 
 const runs = scriptedAcpRuns();
+
+/** Matches a transcript that announces a sub-agent: any `subagent_update`. */
+const SUBAGENT_UPDATE = /"sessionUpdate":\s*"subagent_update"/;
 
 test.describe.configure({ mode: "serial" });
 
@@ -74,10 +78,12 @@ test.describe("ACP sub-agent sessions, replayed", () => {
       const rendered = await readRenderedSubagentTree(page);
       const stored = await readStoredSubagentTree(request, conversationId);
 
-      expect(
-        stored.length,
-        "the agent-server stored no sub-agent for this transcript",
-      ).toBeGreaterThan(0);
+      if (SUBAGENT_UPDATE.test(await readFile(transcript, "utf8"))) {
+        expect(
+          stored.length,
+          "the agent-server stored no sub-agent for this transcript",
+        ).toBeGreaterThan(0);
+      }
       expect(rendered).toEqual(stored);
     });
   }
