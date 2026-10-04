@@ -1,21 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ACP_SESSION_CONTROLS_EVENT_KIND,
+  isACPSessionControlsEvent,
   type ACPSessionControlsEvent,
 } from "@openhands/typescript-client";
 import EventService from "#/api/event-service/event-service.api";
 import { useActiveBackend } from "#/contexts/active-backend-context";
 import { ACP_SESSION_CONTROLS_QUERY_KEYS } from "#/hooks/query/query-keys";
 import { useEventStore, type OHEvent } from "#/stores/use-event-store";
-import { isACPSessionControlsEvent } from "#/types/agent-server/type-guards";
-import type { OpenHandsEvent } from "#/types/agent-server/core";
 
 function newestControlsEvent(
   events: readonly OHEvent[],
 ): ACPSessionControlsEvent | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index] as OpenHandsEvent;
-    if (isACPSessionControlsEvent(event)) return event;
+    const event = events[index];
+    if ("kind" in event && isACPSessionControlsEvent(event)) return event;
   }
   return null;
 }
