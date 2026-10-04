@@ -26,7 +26,7 @@ export interface UseSlashCommandOptions {
 const NO_AGENT_COMMANDS: ACPAvailableCommand[] = [];
 
 /** An ACP agent's command as a slash menu item, the way built-ins are built. */
-export function toAgentSlashCommandItem(
+function toAgentSlashCommandItem(
   command: ACPAvailableCommand,
 ): SlashCommandItem {
   const slashCommand = `/${command.name}`;

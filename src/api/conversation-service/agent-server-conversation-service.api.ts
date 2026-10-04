@@ -426,7 +426,7 @@ export interface CreateConversationOptions {
   acpConfigOptions?: ACPConfigOptionValues;
 }
 
-export interface LocalStartConversationRequest {
+interface LocalStartConversationRequest {
   /** The body POST /api/conversations takes, without user_id and acp_config_options. */
   payload: Record<string, unknown>;
   conversationId: string;

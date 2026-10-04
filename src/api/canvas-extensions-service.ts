@@ -20,7 +20,7 @@ const CANVAS_EXTENSIONS_BASE_PATH = "/api/canvas-extensions";
  * How long a request to an App's owning agent-server may take, including
  * `host.agentServer.request`; an App backend start can take 30 s.
  */
-export const CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS = 60_000;
+const CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS = 60_000;
 const REMOTE_EXTENSION_SOURCE_PATTERN =
   /^(?:github:|https?:\/\/|git:\/\/|file:\/\/|[\w.-]+@[\w.-]+:)/i;
 

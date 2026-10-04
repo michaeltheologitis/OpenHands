@@ -6,13 +6,10 @@ import { I18nKey } from "#/i18n/declaration";
  * code-specific header and, for credential failures, a recovery action.
  */
 export const ACP_AUTH_REQUIRED_CODE = "ACPAuthRequired";
-/** A start-time `acp_config_options` value the agent refused. */
-export const ACP_CONFIG_OPTION_REJECTED_CODE = "ACPConfigOptionRejected";
 
 const ACP_ERROR_HEADER_KEYS: Record<string, I18nKey> = {
   ACPAuthRequired: I18nKey.ERROR$ACP_AUTH_REQUIRED_TITLE,
-  [ACP_CONFIG_OPTION_REJECTED_CODE]:
-    I18nKey.ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE,
+  ACPConfigOptionRejected: I18nKey.ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE,
   // Spawn/init/prompt/usage-policy failures share the generic "Agent error"
   // header; their detail already carries the specific cause.
   ACPSpawnError: I18nKey.CHAT_INTERFACE$AGENT_ERROR_MESSAGE,
