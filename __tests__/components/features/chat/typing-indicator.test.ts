@@ -9,6 +9,7 @@ import {
 import type { Action } from "#/types/agent-server/core/base/action";
 import type { ACPToolCallEvent } from "#/types/agent-server/core/events/acp-tool-call-event";
 import type { OHEvent } from "#/stores/use-event-store";
+import { call } from "../../../helpers/subagent-events";
 
 const makeActionEvent = (
   id: string,
@@ -257,6 +258,18 @@ describe("deriveLiveActivity", () => {
       });
     },
   );
+
+  it("a finished child call does not mask a running root call with the same id", () => {
+    const rootRunning = call(1, "c1", { title: "spawn" });
+    const childStarted = call(2, "c1", { session: "n2", title: "count" });
+    const childDone = call(3, "c1", { session: "n2", status: "completed" });
+
+    expect(deriveLiveActivity([rootRunning, childStarted, childDone])).toEqual({
+      kind: "translation",
+      key: "ACTION_MESSAGE$ACP_RUN",
+      values: { title: "spawn" },
+    });
+  });
 
   it("falls back to Thinking for unsupported and planning-only actions", () => {
     const unsupported = makeActionEvent("1", {

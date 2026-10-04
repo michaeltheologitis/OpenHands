@@ -20,6 +20,7 @@ import {
   handleEventForUI,
   openStreamingSlot,
 } from "#/utils/handle-event-for-ui";
+import { call } from "../helpers/subagent-events";
 
 describe("handleEventForUI", () => {
   const mockObservationEvent: ObservationEvent = {
@@ -300,6 +301,20 @@ describe("handleEventForUI", () => {
       ]);
 
       expect(result).toEqual([mockMessageEvent, other, mockCompleted]);
+    });
+
+    // @spec SUB-004 — The root's flow shows only the root session's work
+    it("keeps ACP tool calls of different sessions apart", () => {
+      const rootStarted = call(1, "c1");
+      const childStarted = call(2, "c1", { session: "n2" });
+      const childDone = call(3, "c1", { session: "n2", status: "completed" });
+
+      const result = [rootStarted, childStarted, childDone].reduce(
+        (uiEvents, event) => handleEventForUI(event, uiEvents),
+        [] as OpenHandsEvent[],
+      );
+
+      expect(result).toEqual([rootStarted, childDone]);
     });
   });
 
