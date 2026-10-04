@@ -2,11 +2,11 @@
  * What a build's config/defaults.json may set for the npm and desktop
  * launchers, and the checks on those values.
  *
- * The keys are fallbacks for environment variables of the same meaning. Each
- * launcher's main() calls applyLauncherDefaults() once, first, which adds them
- * to process.env only where the variable is unset; every other function keeps
+ * The keys are fallbacks for environment variables of the same meaning.
+ * applyLauncherDefaults() adds them to the environment only where the variable
+ * is unset; called once at a launcher's entry, it leaves every other function
  * reading only the env it is given. So environment variables still win,
- * variable by variable, and the children the launchers start inherit the same
+ * variable by variable, and the children a launcher starts inherit the same
  * values.
  *
  *   sources.agentServerGitRepo -> OH_AGENT_SERVER_GIT_REPO
@@ -16,29 +16,17 @@
  *                                 files inside it (OH_SECRET_KEY_PATH,
  *                                 OH_SESSION_API_KEY_PATH)
  *
- * `setup` (a command the full-stack launcher runs as the user before the stack
- * starts and once the agent-server is ready) is read by readSetupConfig.
+ * `setup` names a command to run as the user before the stack starts and once
+ * the agent-server is ready; readSetupConfig validates it.
  *
  * Dependency-free (Node built-ins only): the packaged desktop app strips
  * node_modules, so a bare import here would fail only in the installed app.
  */
 
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
 
 const DEFAULTS_FILE = "config/defaults.json";
-
-/** The phases a setup command can run in, in launch order. */
-export const SETUP_PHASES = Object.freeze(["before-start", "after-ready"]);
-
-/**
- * @typedef {object} SetupConfig
- * @property {string[]} command  argv; command[0] is resolved on PATH; run without a shell.
- * @property {("before-start" | "after-ready")[]} phases  non-empty, no duplicates, in SETUP_PHASES order.
- */
 
 // Any of these in the environment names the agent-server's source, so a git
 // ref from defaults.json must not outrank it.
@@ -47,66 +35,6 @@ const AGENT_SERVER_SOURCE_VARIABLES = [
   "OH_AGENT_SERVER_GIT_REF",
   "OH_AGENT_SERVER_VERSION",
 ];
-
-/**
- * Read config/defaults.json next to this module's scripts/ directory (the same
- * layout in the repo, the npm package and the packaged app).
- * @returns {Record<string, any>}
- */
-export function loadSharedDefaults() {
-  const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
-  return JSON.parse(
-    readFileSync(path.join(scriptsDir, "..", DEFAULTS_FILE), "utf-8"),
-  );
-}
-
-/**
- * Expand a leading "~" or "~/" to `home`; return the result if it is absolute.
- * @param {string} value
- * @param {string} name  how errors name the value, e.g. "paths.stateDir in config/defaults.json"
- * @param {string} [home] defaults to os.homedir()
- * @returns {string} an absolute path
- * @throws {Error} `${name} must be an absolute path or start with ~/, got: ${value}`
- */
-export function expandHomePath(value, name, home = homedir()) {
-  const expanded =
-    value === "~"
-      ? home
-      : typeof value === "string" && value.startsWith("~/")
-        ? path.join(home, value.slice(2))
-        : value;
-  if (typeof expanded !== "string" || !path.isAbsolute(expanded)) {
-    throw new Error(
-      `${name} must be an absolute path or start with ~/, got: ${value}`,
-    );
-  }
-  return expanded;
-}
-
-/**
- * Accept an https:// or ssh:// URL with no whitespace; reject anything else (an
- * scp-style git@host:path, a bare owner/repo, a git+ prefix, http://, file://).
- * uv fetches a git requirement over `git+https` or `git+ssh`; the launcher adds
- * the `git+` prefix itself.
- *
- * @param {unknown} value
- * @param {string} name  e.g. "OH_AGENT_SERVER_GIT_REPO" or "sources.agentServerGitRepo in config/defaults.json"
- * @returns {string} the value
- * @throws {Error} `${name} must be an https or ssh git URL, got: ${value}`
- */
-export function validateGitRepoUrl(value, name) {
-  if (typeof value === "string" && !/\s/.test(value)) {
-    try {
-      const url = new URL(value);
-      if ((url.protocol === "https:" || url.protocol === "ssh:") && url.host) {
-        return value;
-      }
-    } catch {
-      // Not a URL at all; reported below.
-    }
-  }
-  throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
-}
 
 /**
  * The environment entries config/defaults.json supplies: only variables `env`
@@ -167,20 +95,63 @@ export function launcherDefaultsEnv(env, defaults, home = homedir()) {
 }
 
 /**
- * Add launcherDefaultsEnv(env, defaults) to `env` in place. Each launcher's
- * main() calls this first.
- * @param {Record<string, string | undefined>} [env] defaults to process.env
- * @param {Record<string, any>} [defaults] defaults to loadSharedDefaults()
+ * Add launcherDefaultsEnv(env, defaults) to `env` in place.
+ * @param {Record<string, string | undefined>} env
+ * @param {Record<string, any>} defaults  the parsed config/defaults.json
  * @returns {string[]} the names of the variables it filled, sorted
  */
-export function applyLauncherDefaults(
-  env = process.env,
-  defaults = loadSharedDefaults(),
-) {
+export function applyLauncherDefaults(env, defaults) {
   const filled = launcherDefaultsEnv(env, defaults);
   Object.assign(env, filled);
   return Object.keys(filled).sort();
 }
+
+/**
+ * `value` with a leading "~" or "~/" expanded to `home`; throws, naming the
+ * value `name`, unless that is an absolute path.
+ */
+function expandHomePath(value, name, home) {
+  const expanded =
+    value === "~"
+      ? home
+      : typeof value === "string" && value.startsWith("~/")
+        ? path.join(home, value.slice(2))
+        : value;
+  if (typeof expanded !== "string" || !path.isAbsolute(expanded)) {
+    throw new Error(
+      `${name} must be an absolute path or start with ~/, got: ${value}`,
+    );
+  }
+  return expanded;
+}
+
+/**
+ * Accept an https:// or ssh:// URL with no whitespace; reject anything else (an
+ * scp-style git@host:path, a bare owner/repo, a git+ prefix, http://, file://).
+ * The value is a plain repository URL: uv's `git+` scheme is not part of it.
+ *
+ * @param {unknown} value
+ * @param {string} name  e.g. "OH_AGENT_SERVER_GIT_REPO" or "sources.agentServerGitRepo in config/defaults.json"
+ * @returns {string} the value
+ * @throws {Error} `${name} must be an https or ssh git URL, got: ${value}`
+ */
+export function validateGitRepoUrl(value, name) {
+  const url =
+    typeof value === "string" && !/\s/.test(value) ? URL.parse(value) : null;
+  if ((url?.protocol === "https:" || url?.protocol === "ssh:") && url.host) {
+    return value;
+  }
+  throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
+}
+
+/** The phases a setup command can run in, in launch order. */
+const SETUP_PHASES = Object.freeze(["before-start", "after-ready"]);
+
+/**
+ * @typedef {object} SetupConfig
+ * @property {string[]} command  argv; command[0] is resolved on PATH; run without a shell.
+ * @property {("before-start" | "after-ready")[]} phases  non-empty, no duplicates, in SETUP_PHASES order.
+ */
 
 /**
  * The setup command of `defaults`, validated, or null when setup.command is

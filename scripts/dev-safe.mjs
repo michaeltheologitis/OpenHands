@@ -34,7 +34,7 @@ import { fileLog, stripAnsi } from "./logger.mjs";
 
 // ── Centralized config (single source of truth for versions, ports, etc.) ───
 const __dev_safe_dirname = path.dirname(fileURLToPath(import.meta.url));
-const SHARED_DEFAULTS = JSON.parse(
+export const SHARED_DEFAULTS = JSON.parse(
   readFileSync(
     path.join(__dev_safe_dirname, "..", "config", "defaults.json"),
     "utf-8",
@@ -53,8 +53,6 @@ const DEFAULT_AGENT_SERVER_PACKAGE = SHARED_DEFAULTS.packages.agentServer;
 /** Upstream's repository, used when OH_AGENT_SERVER_GIT_REPO is unset. */
 export const DEFAULT_AGENT_SERVER_GIT_REPO =
   "https://github.com/OpenHands/software-agent-sdk";
-// A ref uv can reuse from its cache: a full commit pins the code, so it is
-// installed once and later launches need no network.
 const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 const LOCAL_AGENT_SERVER_SUBDIRS = [
   "openhands-agent-server",
@@ -995,7 +993,7 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function main() {
-  applyLauncherDefaults();
+  applyLauncherDefaults(process.env, SHARED_DEFAULTS);
   console.log("Starting isolated agent-server + frontend dev stack...");
   fileLog("info", "Starting isolated agent-server + frontend dev stack...");
   validateFrontendDependencies();

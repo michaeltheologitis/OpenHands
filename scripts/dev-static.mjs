@@ -50,6 +50,7 @@ import {
   formatMissingUvxGuidance,
   isPortBusy,
   releaseStaleConversationLeases,
+  SHARED_DEFAULTS,
 } from "./dev-safe.mjs";
 import { applyLauncherDefaults } from "./launcher-defaults.mjs";
 import {
@@ -580,7 +581,7 @@ function printBanner(config) {
 
 async function main() {
   const args = parseArgs();
-  applyLauncherDefaults();
+  applyLauncherDefaults(process.env, SHARED_DEFAULTS);
   const config = await buildConfig(args);
 
   console.log("");
