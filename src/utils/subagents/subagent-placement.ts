@@ -36,7 +36,10 @@ const append = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
   else map.set(key, [value]);
 };
 
-/** The parent is loaded, and walking up from it never comes back around. */
+/**
+ * The parent is loaded, and walking up from it never comes back around. A
+ * missing session further up sets apart only its own child, not this one.
+ */
 const hasPlaceableAncestry = (
   sessionId: string,
   parent: SessionRef,
@@ -46,7 +49,8 @@ const hasPlaceableAncestry = (
   let current = parent;
   while (current !== ROOT_SESSION) {
     const record = children.get(current);
-    if (!record || seen.has(current)) return false;
+    if (!record) return current !== parent;
+    if (seen.has(current)) return false;
     seen.add(current);
     current = toSessionRef(record.latest.parent_session_id);
   }
