@@ -42363,6 +42363,23 @@
     "uk": "Показувати контрольний список «Початок роботи»",
     "ca": "Mostra la llista Per començar"
   },
+  "SETTINGS$SHOW_SUBAGENT_COSTS": {
+    "en": "Show sub-agent costs",
+    "ja": "サブエージェントのコストを表示",
+    "zh-CN": "显示子代理成本",
+    "zh-TW": "顯示子代理成本",
+    "ko-KR": "하위 에이전트 비용 표시",
+    "de": "Kosten der Unteragenten anzeigen",
+    "no": "Vis kostnader for underagenter",
+    "it": "Mostra i costi dei sottoagenti",
+    "pt": "Mostrar custos dos subagentes",
+    "es": "Mostrar costos de los subagentes",
+    "ar": "إظهار تكاليف الوكلاء الفرعيين",
+    "fr": "Afficher le coût des sous-agents",
+    "tr": "Alt ajan maliyetlerini göster",
+    "uk": "Показувати вартість субагентів",
+    "ca": "Mostra el cost dels subagents"
+  },
   "ONBOARDING$SKIP_GETTING_STARTED_CHECKLIST": {
     "en": "Skip Getting Started checklist",
     "ja": "Getting Started チェックリストをスキップ",

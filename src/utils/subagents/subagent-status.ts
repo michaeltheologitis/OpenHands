@@ -43,6 +43,9 @@ const IDLE_CATEGORIES: ReadonlyMap<string, SubagentStatusCategory> = new Map([
   ["refusal", "refused"],
 ]);
 
+const USD = "USD";
+const COST_DECIMALS = 4;
+
 const reportedOf = (snapshot: ACPSubagentEvent): string | null => {
   if (!snapshot.state) return null;
   return snapshot.stop_reason
@@ -102,6 +105,17 @@ export function canStopSubagent(record: SubagentRecord): boolean {
 /** Running or waiting, confirmed, without `cancel`: Stop shown disabled. */
 export function isStopWithheld(record: SubagentRecord): boolean {
   return isActive(record.latest) && record.latest.cancellable !== true;
+}
+
+/** `$0.0004` for USD (Canvas's own format), `0.0004 EUR` otherwise. */
+export function formatSubagentCost(
+  cost: number | null | undefined,
+  currency: string | null | undefined,
+): string | null {
+  if (cost === null || cost === undefined) return null;
+  const amount = cost.toFixed(COST_DECIMALS);
+  if (currency === USD) return `$${amount}`;
+  return currency ? `${amount} ${currency}` : amount;
 }
 
 export function summarizeSubagents(
