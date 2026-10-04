@@ -52,6 +52,7 @@ it instead.
 | `PORT`                    | Ingress port                   | `8000`  |
 | `OH_AUTOMATION_GIT_REF`   | Git ref for automation backend (overrides the pinned default version) | *(unset)* |
 | `OH_AGENT_SERVER_GIT_REF` | Git ref for agent-server (overrides the pinned default version) | *(unset)* |
+| `OH_APP_BACKEND_PUBLIC_URL` | Origin the agent-server serves Canvas App backends on | `http://127.0.0.1:<agent-server port>` |
 
 ### Alternative: Minimal Mode (without Automation)
 
@@ -88,6 +89,7 @@ OH_AGENT_SERVER_VERSION=1.18.0 npm run dev
 - `OH_CANVAS_SAFE_VSCODE_PORT` — VS Code sidecar port (default `backend port + 1`)
 - `OH_CANVAS_SAFE_STATE_DIR` — base directory for isolated server state
 - `VITE_WORKING_DIR` — repo root used for new conversations (defaults to the current checkout)
+- `OH_APP_BACKEND_PUBLIC_URL` — origin the agent-server serves Canvas App backends on. Its App-backend bridge answers 503 until one is set, and it must differ from the origin Canvas is served on, so the launchers default it to the agent-server's own address, `http://127.0.0.1:<agent-server port>` (Canvas is served on another port, as `localhost`). An explicit value wins.
 
 ## Alternative development workflows
 

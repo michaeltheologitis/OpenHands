@@ -483,6 +483,29 @@ describe("buildAgentServerTelemetryEnv", () => {
       buildAgentServerEnv(agentServerConfig, { env: {} }),
     ).not.toHaveProperty("OH_CONVERSATION_RUNTIME");
   });
+
+  it("gives Canvas App backends the agent-server's own loopback origin by default", () => {
+    // The bridge answers 503 until an App-backend origin is configured, and it
+    // must differ from the origin Canvas is served on (localhost via ingress).
+    const env = buildAgentServerEnv(
+      {
+        ...agentServerConfig,
+        backendPort: 18432,
+        backendBaseUrl: "http://127.0.0.1:18432",
+      },
+      { env: {} },
+    );
+
+    expect(env.OH_APP_BACKEND_PUBLIC_URL).toBe("http://127.0.0.1:18432");
+  });
+
+  it("an OH_APP_BACKEND_PUBLIC_URL in the environment wins", () => {
+    const env = buildAgentServerEnv(agentServerConfig, {
+      env: { OH_APP_BACKEND_PUBLIC_URL: "https://apps.example.test" },
+    });
+
+    expect(env.OH_APP_BACKEND_PUBLIC_URL).toBe("https://apps.example.test");
+  });
 });
 
 describe("buildAgentServerCommand", () => {
