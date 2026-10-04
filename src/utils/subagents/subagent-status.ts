@@ -1,5 +1,5 @@
 import type { ACPSubagentEvent } from "#/types/agent-server/core/events/acp-subagent-event";
-import type { SubagentRecord, SubagentSummary } from "./subagent-index";
+import type { SubagentRecord } from "./subagent-index";
 
 export type SubagentStatusCategory =
   | "running"
@@ -10,6 +10,9 @@ export type SubagentStatusCategory =
   | "refused"
   | "unconfirmed"
   | "other";
+
+/** How many of one call's children are in each category, and in all. */
+export type SubagentSummary = Record<SubagentStatusCategory | "total", number>;
 
 export interface SubagentStatus {
   category: SubagentStatusCategory;
@@ -115,22 +118,20 @@ export function formatSubagentCost(
   return currency ? `${amount} ${currency}` : amount;
 }
 
-const EMPTY_SUBAGENT_SUMMARY: SubagentSummary = {
-  total: 0,
-  running: 0,
-  waiting: 0,
-  done: 0,
-  stopped: 0,
-  limited: 0,
-  refused: 0,
-  unconfirmed: 0,
-  other: 0,
-};
-
 export function summarizeSubagents(
   records: readonly SubagentRecord[],
 ): SubagentSummary {
-  const summary = { ...EMPTY_SUBAGENT_SUMMARY, total: records.length };
+  const summary: SubagentSummary = {
+    total: records.length,
+    running: 0,
+    waiting: 0,
+    done: 0,
+    stopped: 0,
+    limited: 0,
+    refused: 0,
+    unconfirmed: 0,
+    other: 0,
+  };
   for (const record of records) {
     summary[getSubagentStatus(record).category] += 1;
   }

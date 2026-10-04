@@ -1,9 +1,9 @@
 import type { TFunction } from "i18next";
 import { I18nKey } from "#/i18n/declaration";
-import type { SubagentSummary } from "#/utils/subagents/subagent-index";
 import type {
   SubagentStatus,
   SubagentStatusCategory,
+  SubagentSummary,
 } from "#/utils/subagents/subagent-status";
 
 /** Plural keys: `_one` and `_other` exist in translation.json, not the base. */

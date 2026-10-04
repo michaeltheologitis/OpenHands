@@ -34,6 +34,7 @@ import {
   type SessionRef,
 } from "./subagent-keys";
 import { placeSubagents } from "./subagent-placement";
+import type { SubagentSummary } from "./subagent-status";
 
 export interface SubagentRecord {
   /** The newest snapshot in log order, whatever its source. */
@@ -109,18 +110,6 @@ export interface PendingSubagent {
   parentSessionRef: SessionRef;
   /** Where the child goes once history is complete; null: could not be placed. */
   fallback: SubagentAnchor | null;
-}
-
-export interface SubagentSummary {
-  total: number;
-  running: number;
-  waiting: number;
-  done: number;
-  stopped: number;
-  limited: number;
-  refused: number;
-  unconfirmed: number;
-  other: number;
 }
 
 export interface SubagentPlacement {
