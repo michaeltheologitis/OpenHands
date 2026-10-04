@@ -129,6 +129,20 @@
         "src/routes/conversation-app-panel.tsx"
       ],
       "tests": ["canvas-extensions"]
+    },
+    {
+      "comment": "ACP agent commands and option picker: preview, live controls, slash menu",
+      "sources": [
+        "src/hooks/chat/use-agent-controls.ts",
+        "src/hooks/chat/use-slash-command.ts",
+        "src/hooks/query/use-acp-session-preview.ts",
+        "src/hooks/query/use-latest-acp-session-controls.ts",
+        "src/hooks/mutation/use-set-acp-config-option.ts",
+        "src/stores/home-agent-options-store.ts",
+        "src/api/event-service/**",
+        "tests/e2e/mock-llm/scripts/mock-acp-server.py"
+      ],
+      "tests": ["conversations"]
     }
   ],
 
