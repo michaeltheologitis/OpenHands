@@ -50,14 +50,8 @@ export interface MessageRecord {
 
 export type TranscriptItem =
   | {
-      kind: "tool_call";
-      /** `toolCallKey(...)`; the record lives in `toolCalls`. */
-      key: string;
-      at: string;
-    }
-  | {
-      kind: "message";
-      /** `messageKey(...)`; the record lives in `messages`. */
+      kind: "tool_call" | "message";
+      /** The record's key in `toolCalls` or `messages`. */
       key: string;
       at: string;
     }
@@ -156,40 +150,34 @@ export const EMPTY_SUBAGENT_INDEX: SubagentIndex = {
   version: 0,
 };
 
-/** A map copied on its first write in one fold, so unchanged maps keep identity. */
-interface WritableMap<K, V> {
-  read: (key: K) => V | undefined;
-  write: (key: K, value: V) => void;
-  result: () => ReadonlyMap<K, V>;
-  written: () => boolean;
-}
-
-function writableMap<K, V>(source: ReadonlyMap<K, V>): WritableMap<K, V> {
+/** A map copied on its first write, so a map the fold never writes is kept. */
+function writableMap<K, V>(source: ReadonlyMap<K, V>) {
   let copy: Map<K, V> | null = null;
   return {
-    read: (key) => (copy ?? source).get(key),
-    write: (key, value) => {
+    read: (key: K) => (copy ?? source).get(key),
+    write: (key: K, value: V) => {
       copy ??= new Map(source);
       copy.set(key, value);
     },
-    result: () => copy ?? source,
-    written: () => copy !== null,
+    result: (): ReadonlyMap<K, V> => copy ?? source,
   };
 }
 
 /** One fold's copy-on-write view of the records. */
-interface Draft {
-  children: WritableMap<string, SubagentRecord>;
-  toolCalls: WritableMap<string, ToolCallRecord>;
-  messages: WritableMap<string, MessageRecord>;
-  firstMessageTo: WritableMap<string, string>;
-  transcripts: WritableMap<string, readonly TranscriptItem[]>;
-  stats: WritableMap<string, ChildStats>;
+const draftOf = (index: SubagentIndex) => ({
+  children: writableMap(index.children),
+  toolCalls: writableMap(index.toolCalls),
+  messages: writableMap(index.messages),
+  firstMessageTo: writableMap(index.firstMessageTo),
+  transcripts: writableMap(index.transcripts),
+  stats: writableMap(index.stats),
   /** Transcripts already copied in this fold, safe to change in place. */
-  ownedTranscripts: Map<string, TranscriptItem[]>;
+  ownedTranscripts: new Map<string, TranscriptItem[]>(),
   /** Sessions whose answer may have changed. */
-  answersToCheck: Set<string>;
-}
+  answersToCheck: new Set<string>(),
+});
+
+type Draft = ReturnType<typeof draftOf>;
 
 const NO_STATS: ChildStats = { toolCalls: 0, answerKey: null };
 
@@ -199,6 +187,15 @@ const earlier = (a: string, b: string) =>
 /** "Latest" is the newer timestamp; an equal one arrived later, so it wins. */
 const isAtLeastAsNew = (event: BaseEvent, held: BaseEvent | null | undefined) =>
   !held || compareTimestamps(event.timestamp, held.timestamp) >= 0;
+
+/** A record's newest event and earliest timestamp, with `event` folded in. */
+const upsert = <E extends BaseEvent>(
+  held: { latest: E; firstAt: string } | undefined,
+  event: E,
+) => ({
+  latest: held && !isAtLeastAsNew(event, held.latest) ? held.latest : event,
+  firstAt: held ? earlier(held.firstAt, event.timestamp) : event.timestamp,
+});
 
 const isStarted = (event: ACPToolCallEvent) =>
   event.status === "pending" || event.status === "in_progress";
@@ -270,12 +267,11 @@ function foldSnapshot(draft: Draft, event: ACPSubagentEvent): boolean {
   const held = draft.children.read(sessionId);
   const confirms = event.source !== "environment";
   const next: SubagentRecord = {
-    latest: held && !isAtLeastAsNew(event, held.latest) ? held.latest : event,
+    ...upsert(held, event),
     lastConfirmed:
       confirms && isAtLeastAsNew(event, held?.lastConfirmed)
         ? event
         : (held?.lastConfirmed ?? null),
-    firstAt: held ? earlier(held.firstAt, event.timestamp) : event.timestamp,
   };
   if (
     held?.latest === next.latest &&
@@ -297,8 +293,7 @@ function foldToolCall(draft: Draft, event: ACPToolCallEvent): boolean {
   const key = toolCallKey(event.acp_session_id, event.tool_call_id);
   const held = draft.toolCalls.read(key);
   const next: ToolCallRecord = {
-    latest: held && !isAtLeastAsNew(event, held.latest) ? held.latest : event,
-    firstAt: held ? earlier(held.firstAt, event.timestamp) : event.timestamp,
+    ...upsert(held, event),
     startLoaded: (held?.startLoaded ?? false) || isStarted(event),
   };
   draft.toolCalls.write(key, next);
@@ -322,10 +317,7 @@ function foldToolCall(draft: Draft, event: ACPToolCallEvent): boolean {
 function foldMessage(draft: Draft, event: ACPSessionMessageEvent): boolean {
   const key = messageKey(event.acp_session_id, event.message_id);
   const held = draft.messages.read(key);
-  const next: MessageRecord = {
-    latest: held && !isAtLeastAsNew(event, held.latest) ? held.latest : event,
-    firstAt: held ? earlier(held.firstAt, event.timestamp) : event.timestamp,
-  };
+  const next: MessageRecord = upsert(held, event);
   draft.messages.write(key, next);
   const sessionId = event.acp_session_id;
   if (sessionId) draft.answersToCheck.add(sessionId);
@@ -405,16 +397,7 @@ export function foldSubagentEvents(
   index: SubagentIndex,
   events: readonly OpenHandsEvent[],
 ): SubagentIndex {
-  const draft: Draft = {
-    children: writableMap(index.children),
-    toolCalls: writableMap(index.toolCalls),
-    messages: writableMap(index.messages),
-    firstMessageTo: writableMap(index.firstMessageTo),
-    transcripts: writableMap(index.transcripts),
-    stats: writableMap(index.stats),
-    ownedTranscripts: new Map(),
-    answersToCheck: new Set(),
-  };
+  const draft = draftOf(index);
   let placementDirty = false;
   for (const event of events) {
     if (!isFromPlanningAgent(event)) {
@@ -424,16 +407,6 @@ export function foldSubagentEvents(
   draft.answersToCheck.delete(ROOT_SESSION);
   draft.answersToCheck.forEach((sessionId) => updateAnswer(draft, sessionId));
 
-  const maps = [
-    draft.children,
-    draft.toolCalls,
-    draft.messages,
-    draft.firstMessageTo,
-    draft.transcripts,
-    draft.stats,
-  ];
-  if (!maps.some((map) => map.written())) return index;
-
   const records: SubagentRecords = {
     children: draft.children.result(),
     toolCalls: draft.toolCalls.result(),
@@ -442,6 +415,10 @@ export function foldSubagentEvents(
     transcripts: draft.transcripts.result(),
     stats: draft.stats.result(),
   };
+  const unchanged = (Object.keys(records) as (keyof SubagentRecords)[]).every(
+    (map) => records[map] === index[map],
+  );
+  if (unchanged) return index;
   const { placement, needsOlderHistory } = placementDirty
     ? placeSubagents(records, index.placement)
     : index;
