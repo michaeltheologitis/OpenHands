@@ -21,6 +21,9 @@ Agent Server as `ACPSubagentEvent`, `ACPSessionMessageEvent`, `ACPSessionTextEve
 ### SUB-005: Latest state, never a stale spinner
 - [x] Each sub-agent shall show its latest state; an unconfirmed state shall never show a spinner.
 
+### SUB-007: Stop only when granted
+- [x] Stop shall be offered only for a running sub-agent that granted cancel on the live connection; success shall be shown only when the agent reports it.
+
 ### SUB-008: History a fan-out needs
 - [x] Opening a conversation shall load the older history its visible sub-agents need, and no more.
 
@@ -32,7 +35,7 @@ Agent Server as `ACPSubagentEvent`, `ACPSessionMessageEvent`, `ACPSessionTextEve
   - `acp-tool-call` (root or child call): `data-acp-tool-call-id`; `data-acp-session-id` (absent for the root); `data-acp-tool-call-status`: `pending`, `in_progress`, `completed`, `failed`.
   - `subagent-block` (the sub-agents of one call): `data-subagent-count`; its toggle `subagent-block-toggle` with `aria-expanded`.
   - `subagent-row` (one sub-agent): `data-acp-session-id`; `data-subagent-status`: `running`, `waiting`, `done`, `stopped`, `limited`, `refused`, `unconfirmed`, `other`; `data-subagent-stale` when the state is the last known one; its toggle `subagent-row-toggle` with `aria-expanded`.
-  - Within a row: `subagent-title`, `subagent-status`, `subagent-answer`, `subagent-tool-calls`.
+  - Within a row: `subagent-title`, `subagent-status`, `subagent-answer`, `subagent-tool-calls`; `subagent-stop` with `data-subagent-stop`: `ready`, `stopping` or `withheld` (`aria-disabled` in the last two).
   - `subagent-transcript` (an expanded row's transcript) and `subagent-task` (the task at its top).
   - `subagent-unplaced` (sub-agents whose parent session is missing): `data-missing-parent-session-id`.
   - `subagent-loading-earlier` ("Loading earlier sub-agent activity…").

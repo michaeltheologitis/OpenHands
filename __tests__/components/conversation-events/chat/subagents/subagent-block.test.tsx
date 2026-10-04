@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "test-utils";
 import { AcpToolCallCell } from "#/components/conversation-events/chat/subagents/acp-tool-call-cell";
-import { SubagentHistoryContext } from "#/components/conversation-events/chat/subagents/subagent-source";
+import {
+  SubagentHistoryContext,
+  SubagentSourceContext,
+  useStaticSubagentSource,
+} from "#/components/conversation-events/chat/subagents/subagent-source";
+import EventService from "#/api/event-service/event-service.api";
+import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { useEventStore } from "#/stores/use-event-store";
 import type { OpenHandsEvent } from "#/types/agent-server/core";
 import type { ACPToolCallEvent } from "#/types/agent-server/core/events/acp-tool-call-event";
@@ -26,6 +32,30 @@ vi.mock("react-i18next", async (importOriginal) => {
     }),
   };
 });
+
+const RUNTIME_URL = "http://runtime.example.com/api/conversations/conv-1";
+
+vi.mock("#/hooks/query/use-active-conversation", () => ({
+  useActiveConversation: () => ({
+    data: {
+      id: "conv-1",
+      conversation_url: "http://runtime.example.com/api/conversations/conv-1",
+      session_api_key: "session-key",
+    },
+  }),
+}));
+
+vi.mock("#/utils/custom-toast-handlers", () => ({
+  displayErrorToast: vi.fn(),
+}));
+
+/** An error as the TypeScript client raises it, with the agent-server's body. */
+const httpError = (status: number, body: Record<string, string>) =>
+  Object.assign(new Error(`HTTP ${status}`), {
+    name: "HttpError",
+    status,
+    response: body,
+  });
 
 const seed = (...events: OpenHandsEvent[]) =>
   act(() => useEventStore.getState().addEvents(events));
@@ -71,6 +101,8 @@ const expandRow = async (sessionId: string) => {
 describe("sub-agents under the call that spawned them", () => {
   beforeEach(() => {
     useEventStore.getState().clearEvents();
+    vi.restoreAllMocks();
+    vi.mocked(displayErrorToast).mockReset();
   });
 
   it("shows a collapsed summary counting children by state", () => {
@@ -130,6 +162,7 @@ describe("sub-agents under the call that spawned them", () => {
       "running · last known",
     );
     expect(within(row).queryByTestId("spinner-icon")).not.toBeInTheDocument();
+    expect(within(row).queryByTestId("subagent-stop")).not.toBeInTheDocument();
     expect(toggle).toHaveTextContent(
       "1 sub-agent · 1 not confirmed since reconnecting",
     );
@@ -252,5 +285,133 @@ describe("sub-agents under the call that spawned them", () => {
     expect(
       screen.queryByTestId("subagent-loading-earlier"),
     ).not.toBeInTheDocument();
+  });
+
+  describe("Stop", () => {
+    const stopOf = (sessionId: string) =>
+      within(rowOf(sessionId)).queryByTestId("subagent-stop");
+
+    const openStoppableRun = () =>
+      openRun(
+        child(2, "n2", { cell: "c1", title: "Read CS201", cancellable: true }),
+        child(3, "n3", { cell: "c1", cancellable: false }),
+        // An agent may keep a finished child's grant; the route answers 409.
+        child(4, "n4", {
+          cell: "c1",
+          state: "idle",
+          stopReason: "end_turn",
+          cancellable: true,
+        }),
+        child(5, "n5", { cell: "c1", cancellable: true }),
+        reconnect(6, "n5", { cell: "c1" }),
+      );
+
+    // @spec SUB-007 — Stop is offered only for a running sub-agent that granted cancel on the live connection
+    it("offers Stop only for a running child that granted cancel", async () => {
+      await openStoppableRun();
+
+      expect(stopOf("n2")).toHaveAttribute("data-subagent-stop", "ready");
+      expect(stopOf("n2")).not.toHaveAttribute("aria-disabled", "true");
+      expect(stopOf("n2")).toHaveAccessibleName("Stop Read CS201");
+      expect(stopOf("n3")).toHaveAttribute("data-subagent-stop", "withheld");
+      expect(stopOf("n4")).toBeNull();
+      expect(stopOf("n5")).toBeNull();
+    });
+
+    it("explains why Stop is unavailable when the agent withheld cancel", async () => {
+      const cancel = vi.spyOn(EventService, "cancelAcpSession");
+      await openStoppableRun();
+
+      const withheld = stopOf("n3") as HTMLElement;
+      expect(withheld).toHaveAttribute("aria-disabled", "true");
+      await user.hover(withheld);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        "This agent cannot stop a single sub-agent. Stop ends the whole turn.",
+      );
+      await user.click(withheld);
+      expect(cancel).not.toHaveBeenCalled();
+    });
+
+    it("asks to cancel and waits for the child's own cancelled state", async () => {
+      const cancel = vi
+        .spyOn(EventService, "cancelAcpSession")
+        .mockResolvedValue({ session_id: "n2", requested: true });
+      await openStoppableRun();
+
+      await user.click(stopOf("n2") as HTMLElement);
+
+      expect(cancel).toHaveBeenCalledWith(
+        "conv-1",
+        "n2",
+        RUNTIME_URL,
+        "session-key",
+      );
+      expect(stopOf("n2")).toHaveAttribute("data-subagent-stop", "stopping");
+      expect(stopOf("n2")).toHaveAttribute("aria-disabled", "true");
+      expect(stopOf("n2")).toHaveTextContent("Stopping…");
+      expect(rowOf("n2")).toHaveAttribute("data-subagent-status", "running");
+
+      seed(
+        child(7, "n2", { cell: "c1", state: "idle", stopReason: "cancelled" }),
+      );
+
+      expect(stopOf("n2")).toBeNull();
+      expect(rowOf("n2")).toHaveAttribute("data-subagent-status", "stopped");
+    });
+
+    it.each([
+      [
+        "a 409 with its detail",
+        httpError(409, {
+          detail:
+            "ACP session n2 does not accept cancel; cancel the conversation's turn instead.",
+        }),
+        "ACP session n2 does not accept cancel; cancel the conversation's turn instead.",
+      ],
+      [
+        "a 504, whose reason the agent-server moves under exception",
+        httpError(504, {
+          detail: "Internal Server Error",
+          exception:
+            "504: ACP server did not accept the cancel for n2 within 2s.",
+        }),
+        "ACP server did not accept the cancel for n2 within 2s.",
+      ],
+      [
+        "a failure without a body",
+        new Error("Failed to fetch"),
+        "Could not stop the sub-agent.",
+      ],
+    ])(
+      "shows the server's reason when a cancel is refused: %s",
+      async (_case, error, shown) => {
+        vi.spyOn(EventService, "cancelAcpSession").mockRejectedValue(error);
+        await openStoppableRun();
+
+        await user.click(stopOf("n2") as HTMLElement);
+
+        expect(displayErrorToast).toHaveBeenCalledWith(shown);
+        expect(stopOf("n2")).toHaveAttribute("data-subagent-stop", "ready");
+      },
+    );
+
+    it("never offers Stop in a read-only view", async () => {
+      const cell = call(1, "c1");
+      const events = [cell, child(2, "n2", { cell: "c1", cancellable: true })];
+      function ReadOnlyCell() {
+        const source = useStaticSubagentSource(events);
+        return (
+          <SubagentSourceContext.Provider value={source}>
+            <AcpToolCallCell event={cell} depth={0} />
+          </SubagentSourceContext.Provider>
+        );
+      }
+      renderWithProviders(<ReadOnlyCell />);
+
+      await user.click(screen.getByTestId("subagent-block-toggle"));
+
+      expect(rowOf("n2")).toHaveAttribute("data-subagent-status", "running");
+      expect(stopOf("n2")).toBeNull();
+    });
   });
 });

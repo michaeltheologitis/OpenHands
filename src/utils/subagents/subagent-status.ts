@@ -63,6 +63,9 @@ const categoryOf = (snapshot: ACPSubagentEvent): SubagentStatusCategory => {
 const isUnconfirmed = (snapshot: ACPSubagentEvent) =>
   snapshot.source === "environment" || !snapshot.state;
 
+const isActive = (snapshot: ACPSubagentEvent) =>
+  !isUnconfirmed(snapshot) && ACTIVE_STATES.has(snapshot.state ?? "");
+
 export function getSubagentStatus(record: SubagentRecord): SubagentStatus {
   const { latest, lastConfirmed } = record;
   if (!isUnconfirmed(latest)) {
@@ -89,6 +92,16 @@ export function getSubagentStatus(record: SubagentRecord): SubagentStatus {
     stale: true,
     lastKnown: wasActive ? confirmed : null,
   };
+}
+
+/** Running or waiting, confirmed on the live connection, with `cancel`. */
+export function canStopSubagent(record: SubagentRecord): boolean {
+  return isActive(record.latest) && record.latest.cancellable === true;
+}
+
+/** Running or waiting, confirmed, without `cancel`: Stop shown disabled. */
+export function isStopWithheld(record: SubagentRecord): boolean {
+  return isActive(record.latest) && record.latest.cancellable !== true;
 }
 
 export function summarizeSubagents(
