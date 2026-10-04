@@ -204,13 +204,21 @@ function findClientPinMismatch(pinnedVersion, expectedVersion) {
 }
 
 /**
- * Read the typescript-client pin from package.json.
+ * Read the typescript-client pin from package.json. A pin to a release
+ * tarball's URL reads as the version package-lock.json locked for it.
  */
-function readClientPin() {
-  const pkg = JSON.parse(
-    readFileSync(join(projectRoot, "package.json"), "utf-8"),
+function readClientPin(root = projectRoot) {
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+  const pin = pkg.dependencies?.[CLIENT_PACKAGE_NAME] ?? null;
+  if (!pin?.startsWith("https://")) {
+    return pin;
+  }
+  const lock = JSON.parse(
+    readFileSync(join(root, "package-lock.json"), "utf-8"),
   );
-  return pkg.dependencies?.[CLIENT_PACKAGE_NAME] ?? null;
+  return (
+    lock.packages?.[`node_modules/${CLIENT_PACKAGE_NAME}`]?.version ?? null
+  );
 }
 
 /**
