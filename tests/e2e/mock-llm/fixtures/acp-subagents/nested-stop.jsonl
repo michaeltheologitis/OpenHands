@@ -1,0 +1,31 @@
+{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": 1}}
+{"jsonrpc": "2.0", "id": 0, "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": false}, "authMethods": []}}
+{"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": {"cwd": "/", "mcpServers": []}}
+{"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "nested-root"}}
+{"jsonrpc": "2.0", "id": 2, "method": "session/prompt", "params": {"sessionId": "nested-root", "prompt": []}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-1", "title": "Run spawn(child-x, child-y)", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-x", "title": "Read CS201", "state": {"state": "running"}, "_meta": {"openhands": {"parentToolCallId": "cell-1"}}, "capabilities": {"cancel": {}}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "session_message", "messageId": "child-x-task", "senderSessionId": "nested-root", "recipientSessionId": "child-x", "content": [{"type": "text", "text": "Read CS201."}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-y", "title": "Read CS101", "state": {"state": "running"}, "_meta": {"openhands": {"parentToolCallId": "cell-1"}}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "session_message", "messageId": "child-y-task", "senderSessionId": "nested-root", "recipientSessionId": "child-y", "content": [{"type": "text", "text": "Read CS101."}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Looking at CS201."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-x1", "title": "Run delegate(child-z)", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-z", "title": "Check CS201 prerequisites", "state": {"state": "running"}, "_meta": {"openhands": {"parentToolCallId": "cell-x1"}}, "capabilities": {"cancel": {}}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "session_message", "messageId": "child-z-task", "senderSessionId": "child-x", "recipientSessionId": "child-z", "content": [{"type": "text", "text": "Check the prerequisites of CS201."}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-z", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-z1", "title": "Run lookup('CS201')", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-z", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-z1", "status": "completed", "rawOutput": "CS101, MATH120"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-y", "update": {"sessionUpdate": "tool_call", "toolCallId": "cell-y1", "title": "Run count('CS101')", "kind": "execute", "status": "in_progress"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-y", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-y1", "status": "completed", "rawOutput": "3 credits, 0 prerequisites"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "usage_update", "used": 10, "size": 1000, "cost": {"amount": 0.0004, "currency": "USD"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-z", "update": {"sessionUpdate": "usage_update", "used": 10, "size": 1000, "cost": {"amount": 0.0001, "currency": "USD"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-y", "update": {"sessionUpdate": "usage_update", "used": 10, "size": 1000, "cost": {"amount": 0.0002, "currency": "USD"}}}}
+{"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "child-x"}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Stopping as asked."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-z", "state": {"state": "idle", "stopReason": "cancelled"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-x", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-x1", "status": "failed", "rawOutput": "cancelled"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-x", "state": {"state": "idle", "stopReason": "cancelled"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-y", "update": {"sessionUpdate": "session_message", "messageId": "child-y-answer", "senderSessionId": "child-y", "recipientSessionId": "nested-root", "content": [{"type": "text", "text": "CS101: 3cr, 0 prereqs, light"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "subagent_update", "sessionId": "child-y", "state": {"state": "idle", "stopReason": "end_turn"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "cell-1", "status": "completed", "rawOutput": "child-y answered; child-x stopped"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "nested-root", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "NESTED_STOP_DONE"}}}}
+{"jsonrpc": "2.0", "id": 2, "result": {"stopReason": "end_turn"}}

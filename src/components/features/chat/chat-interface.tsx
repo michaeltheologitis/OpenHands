@@ -53,6 +53,8 @@ import { useOptionalConversationId } from "#/hooks/use-conversation-id";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
 import { I18nKey } from "#/i18n/declaration";
 import { hasConversationStarted } from "./components/resolve-picker-kind";
+import { useEventStore } from "#/stores/use-event-store";
+import { SubagentHistoryContext } from "#/components/conversation-events/chat/subagents/subagent-source";
 
 function getEntryPoint(
   hasRepository: boolean | null,
@@ -214,15 +216,21 @@ export function ChatInterface() {
     scrollTop: number;
   } | null>(null);
 
+  // A failed sub-agent backfill page stops the chain until the conversation
+  // changes, so a broken server is not asked again at the event rate.
+  const [subagentBackfillFailed, setSubagentBackfillFailed] =
+    React.useState(false);
+
   React.useEffect(() => {
     // A pending history load may be discarded during a conversation switch.
     // Do not let the previous conversation's saved scroll geometry affect the
     // next conversation's scroll restoration.
     preserveScrollPosition.current = null;
+    setSubagentBackfillFailed(false);
   }, [conversationId]);
 
   const maybeLoadOlder = React.useCallback(
-    (target: HTMLElement) => {
+    (target: HTMLElement, { force = false }: { force?: boolean } = {}) => {
       if (isProvisioningTask || isLoadingOlderEvents || !hasMoreOlderEvents) {
         return;
       }
@@ -230,7 +238,7 @@ export function ChatInterface() {
       const atTop = target.scrollTop <= SCROLL_TOP_THRESHOLD_PX;
       const noOverflow =
         target.scrollHeight <= target.clientHeight + SCROLL_TOP_THRESHOLD_PX;
-      if (!atTop && !noOverflow) return;
+      if (!force && !atTop && !noOverflow) return;
 
       preserveScrollPosition.current = {
         scrollHeight: target.scrollHeight,
@@ -238,6 +246,7 @@ export function ChatInterface() {
       };
       loadOlder().catch((error) => {
         preserveScrollPosition.current = null;
+        if (force) setSubagentBackfillFailed(true);
         const message =
           error instanceof Error && error.message
             ? error.message
@@ -411,6 +420,14 @@ export function ChatInterface() {
     }
   };
 
+  // Sub-agent content grows without `renderableEvents` changing (a child's
+  // events stay out of the root's flow), so its version also drives the
+  // bottom-following and the scroll restoration after an older page.
+  const subagentsVersion = useEventStore((state) => state.subagents.version);
+  const needsOlderSubagentHistory = useEventStore(
+    (state) => state.subagents.needsOlderHistory,
+  );
+
   // Auto-scroll to bottom when new messages arrive — but only if the user is
   // already pinned to the bottom. Scrolling up to load older events also
   // grows `renderableEvents`, and we don't want to yank the user back to the
@@ -437,6 +454,7 @@ export function ChatInterface() {
     // to scroll when message content changes, not when autoScroll state changes.
   }, [
     renderableEvents.length,
+    subagentsVersion,
     hasPendingUserMessages,
     activeGoalScrollKey,
     scrollDomToBottom,
@@ -461,6 +479,22 @@ export function ChatInterface() {
     if (!target) return;
     maybeLoadOlderRef.current(target);
   }, [renderableEvents.length, hasMoreOlderEvents]);
+
+  // Load older pages, wherever the user is scrolled, while a visible
+  // sub-agent's placement or its spawning call's start is still in them:
+  // each page that lands grows the event list and chains the next. This is
+  // bounded by the fan-out on screen, not by the conversation.
+  // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
+  React.useEffect(() => {
+    const target = scrollRef.current;
+    if (!target || !needsOlderSubagentHistory || subagentBackfillFailed) return;
+    maybeLoadOlderRef.current(target, { force: true });
+  }, [
+    needsOlderSubagentHistory,
+    subagentBackfillFailed,
+    hasMoreOlderEvents,
+    allConversationEvents.length,
+  ]);
 
   // Create a ScrollProvider with the scroll hook values
   const scrollProviderValue = {
@@ -576,10 +610,12 @@ export function ChatInterface() {
             />
 
             {showConversationMessages && renderableEvents.length > 0 && (
-              <Messages
-                messages={renderableEvents}
-                allEvents={allConversationEvents}
-              />
+              <SubagentHistoryContext.Provider value={!hasMoreOlderEvents}>
+                <Messages
+                  messages={renderableEvents}
+                  allEvents={allConversationEvents}
+                />
+              </SubagentHistoryContext.Provider>
             )}
 
             {/*
