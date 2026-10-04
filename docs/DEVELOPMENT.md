@@ -52,6 +52,7 @@ it instead.
 | `PORT`                    | Ingress port                   | `8000`  |
 | `OH_AUTOMATION_GIT_REF`   | Git ref for automation backend (overrides the pinned default version) | *(unset)* |
 | `OH_AGENT_SERVER_GIT_REF` | Git ref for agent-server (overrides the pinned default version) | *(unset)* |
+| `OH_AGENT_SERVER_GIT_REPO` | Git repository `OH_AGENT_SERVER_GIT_REF` installs from (`https://` or `ssh://` URL) | `https://github.com/OpenHands/software-agent-sdk` |
 | `OH_APP_BACKEND_PUBLIC_URL` | Origin the agent-server serves Canvas App backends on | `http://127.0.0.1:<agent-server port>` |
 
 ### Alternative: Minimal Mode (without Automation)
@@ -77,9 +78,17 @@ OH_AGENT_SERVER_LOCAL_PATH=/abs/path/to/software-agent-sdk npm run dev
 OH_AGENT_SERVER_GIT_REF=main npm run dev
 OH_AGENT_SERVER_GIT_REF=abc1234 npm run dev
 
+# Use a branch or commit of another repository, such as a fork
+OH_AGENT_SERVER_GIT_REPO=https://github.com/<owner>/software-agent-sdk \
+  OH_AGENT_SERVER_GIT_REF=<full commit SHA> npm run dev
+
 # Use a specific PyPI version
 OH_AGENT_SERVER_VERSION=1.18.0 npm run dev
 ```
+
+All four SDK packages are installed from the same ref. `OH_AGENT_SERVER_GIT_REPO` names the repository for `OH_AGENT_SERVER_GIT_REF`, like `OH_AUTOMATION_REPO` does for automation: an `https://` or `ssh://` URL (no `git+` prefix), ignored without a ref. The startup log names a non-default repository, for example `Using git (<owner>/software-agent-sdk@<ref>)`.
+
+A full 40-character commit SHA is installed once and reused: the launcher passes no `--reinstall`, so later launches of the same commit start from uv's cache, offline included. A branch, a tag or an abbreviated SHA is refetched and rebuilt (`uvx --reinstall`) on every launch, so those launches need the network.
 
 `OH_AGENT_SERVER_LOCAL_PATH` must be an absolute path to a `software-agent-sdk` checkout containing the `openhands-agent-server`, `openhands-sdk`, `openhands-tools`, and `openhands-workspace` workspace packages. The agent-server itself is rebuilt from local source on each start (`uvx --reinstall`); the other workspace packages are installed editable, so their source changes take effect without a rebuild.
 

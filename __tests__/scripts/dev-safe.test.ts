@@ -686,6 +686,90 @@ describe("buildAgentServerCommand", () => {
       }),
     ).toThrow(/must be an absolute path/);
   });
+
+  describe("from another git repository", () => {
+    const forkRepo = "https://github.com/example/software-agent-sdk";
+    const commitSha = "91430aa551ca3deb88989685656837929b3c246b";
+
+    it("installs all four packages from OH_AGENT_SERVER_GIT_REPO when it is set", () => {
+      const cmd = buildAgentServerCommand({
+        OH_AGENT_SERVER_GIT_REPO: forkRepo,
+        OH_AGENT_SERVER_GIT_REF: "feature-branch",
+      });
+
+      expect(cmd.args.filter((arg) => arg.startsWith("git+"))).toEqual(
+        [
+          "openhands-agent-server",
+          "openhands-sdk",
+          "openhands-tools",
+          "openhands-workspace",
+        ].map((dir) => `git+${forkRepo}@feature-branch#subdirectory=${dir}`),
+      );
+    });
+
+    it.each([
+      [forkRepo, "git (example/software-agent-sdk@feature-branch)"],
+      [`${forkRepo}.git`, "git (example/software-agent-sdk@feature-branch)"],
+      [
+        "ssh://git@gitlab.example.com/team/sdk.git",
+        "git (ssh://git@gitlab.example.com/team/sdk@feature-branch)",
+      ],
+    ])(
+      "names a non-default repository in the source line (%s)",
+      (repo, source) => {
+        const cmd = buildAgentServerCommand({
+          OH_AGENT_SERVER_GIT_REPO: repo,
+          OH_AGENT_SERVER_GIT_REF: "feature-branch",
+        });
+
+        expect(cmd.source).toBe(source);
+      },
+    );
+
+    it("ignores OH_AGENT_SERVER_GIT_REPO without a git ref", () => {
+      const cmd = buildAgentServerCommand({
+        OH_AGENT_SERVER_GIT_REPO: "not a url",
+      });
+
+      expect(cmd.source).toBe("PyPI (1.50.1, default)");
+      expect(cmd.args.join(" ")).not.toContain("git+");
+    });
+
+    it("rejects an OH_AGENT_SERVER_GIT_REPO that is not an https or ssh URL", () => {
+      expect(() =>
+        buildAgentServerCommand({
+          OH_AGENT_SERVER_GIT_REPO: "michaeltheologitis/software-agent-sdk",
+          OH_AGENT_SERVER_GIT_REF: "feature-branch",
+        }),
+      ).toThrow(
+        "OH_AGENT_SERVER_GIT_REPO must be an https or ssh git URL, got: michaeltheologitis/software-agent-sdk",
+      );
+    });
+
+    it("installs a full commit SHA without --reinstall, so a relaunch can run from uv's cache", () => {
+      const cmd = buildAgentServerCommand({
+        OH_AGENT_SERVER_GIT_REPO: forkRepo,
+        OH_AGENT_SERVER_GIT_REF: commitSha,
+      });
+
+      expect(cmd.args).not.toContain("--reinstall");
+      expect(cmd.args.slice(0, 2)).toEqual([
+        "--from",
+        `git+${forkRepo}@${commitSha}#subdirectory=openhands-agent-server`,
+      ]);
+    });
+
+    it.each([
+      ["a branch", "feature-branch"],
+      ["a tag", "v1.50.1"],
+      ["an abbreviated SHA", "abc1234"],
+      ["a SHA one digit short", commitSha.slice(0, 39)],
+    ])("still reinstalls %s on every launch", (_kind, ref) => {
+      const cmd = buildAgentServerCommand({ OH_AGENT_SERVER_GIT_REF: ref });
+
+      expect(cmd.args[0]).toBe("--reinstall");
+    });
+  });
 });
 
 describe("validateLocalAgentServerPath", () => {
