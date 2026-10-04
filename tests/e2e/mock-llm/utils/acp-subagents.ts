@@ -14,8 +14,12 @@ import {
   BACKEND_URL,
   MOCK_ACP_COMMAND_PYTHON,
   SESSION_API_KEY,
+  deleteConversation,
   dismissAnalyticsModal,
+  ensureMockLLMAgentProfile,
   getConversationIdFromURL,
+  resetMockLLM,
+  routeSessionApiKey,
   setChatInput,
   waitForPath,
   waitForTestId,
@@ -85,7 +89,7 @@ export async function configureScriptedAcpAgent(
 }
 
 /** Remove the scripted agent's profile; no other profile is activated. */
-export async function deleteScriptedAcpAgent(request: APIRequestContext) {
+async function deleteScriptedAcpAgent(request: APIRequestContext) {
   await request.delete(
     `${BACKEND_URL}/api/agent-profiles/${SCRIPTED_ACP_PROFILE}`,
     { headers: API_HEADERS },
@@ -105,7 +109,7 @@ export const REPLAY_TRANSCRIPTS: readonly string[] = (
   .map((path) => resolve(path));
 
 /** Start a conversation from the home page with the active agent profile. */
-export async function startConversation(page: Page, message: string) {
+async function startConversation(page: Page, message: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await dismissAnalyticsModal(page);
   await waitForTestId(page, "home-chat-launcher");
@@ -113,6 +117,37 @@ export async function startConversation(page: Page, message: string) {
   await page.getByTestId("submit-button").click();
   await waitForPath(page, /\/conversations\/.+/, 30_000);
   return getConversationIdFromURL(page);
+}
+
+/**
+ * Conversations run by the scripted agent: `start` configures it with
+ * `flags` and starts one; `cleanUp` deletes them all and puts the mock LLM's
+ * agent profile back in its place.
+ */
+export function scriptedAcpRuns() {
+  const conversations: string[] = [];
+  return {
+    async start(
+      page: Page,
+      request: APIRequestContext,
+      flags: readonly string[],
+      message: string,
+    ) {
+      await configureScriptedAcpAgent(request, { flags, subagents: true });
+      await routeSessionApiKey(page);
+      const conversationId = await startConversation(page, message);
+      conversations.push(conversationId);
+      return conversationId;
+    },
+    async cleanUp(request: APIRequestContext) {
+      for (const id of conversations) {
+        await deleteConversation(request, id).catch(() => undefined);
+      }
+      await ensureMockLLMAgentProfile(request).catch(() => undefined);
+      await deleteScriptedAcpAgent(request).catch(() => undefined);
+      await resetMockLLM(request).catch(() => undefined);
+    },
+  };
 }
 
 interface StoredEvent {
@@ -191,7 +226,7 @@ const bySessionId = (a: SubagentLink, b: SubagentLink) =>
   a.sessionId.localeCompare(b.sessionId);
 
 // @spec SUB-011 — The test ids and data attributes of the sub-agent tree are stable
-const COLLAPSED_TOGGLES =
+export const COLLAPSED_TOGGLES =
   '[data-testid="subagent-block-toggle"][aria-expanded="false"], ' +
   '[data-testid="subagent-row-toggle"][aria-expanded="false"]';
 
@@ -443,6 +478,17 @@ export interface ScrollProbeResult {
 
 const SCROLL_PROBE_INTERVAL_MS = 250;
 
+/** The probe's state, kept on the page's window between the two evaluates. */
+interface ScrollProbeState {
+  latencies: number[];
+  longTasks: number[];
+  stopped: boolean;
+  /** When the scroll in flight was due; it counts even if never painted. */
+  pendingDue: number | null;
+}
+
+type ProbedWindow = Window & { subagentScrollProbe: ScrollProbeState };
+
 /** Scroll the chat every 250 ms until `stop` resolves; report the worst. */
 export async function probeScrollResponsiveness(
   page: Page,
@@ -453,16 +499,13 @@ export async function probeScrollResponsiveness(
       '[data-testid="chat-scroll-container"]',
     );
     if (!container) throw new Error("no chat scroll container");
-    const probe = {
-      latencies: [] as number[],
-      longTasks: [] as number[],
+    const probe: ScrollProbeState = {
+      latencies: [],
+      longTasks: [],
       stopped: false,
-      // When the scroll in flight was due; it counts even if never painted.
-      pendingDue: null as number | null,
+      pendingDue: null,
     };
-    (
-      window as unknown as { subagentScrollProbe: typeof probe }
-    ).subagentScrollProbe = probe;
+    (window as unknown as ProbedWindow).subagentScrollProbe = probe;
     new PerformanceObserver((list) => {
       list
         .getEntries()
@@ -493,16 +536,7 @@ export async function probeScrollResponsiveness(
   await stop;
 
   return page.evaluate(() => {
-    const probe = (
-      window as unknown as {
-        subagentScrollProbe: {
-          latencies: number[];
-          longTasks: number[];
-          stopped: boolean;
-          pendingDue: number | null;
-        };
-      }
-    ).subagentScrollProbe;
+    const probe = (window as unknown as ProbedWindow).subagentScrollProbe;
     probe.stopped = true;
     // A scroll that was due and never painted is the worst latency of all.
     const starved =

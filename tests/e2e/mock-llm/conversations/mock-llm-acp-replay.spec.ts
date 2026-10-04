@@ -12,26 +12,20 @@
 import { basename } from "node:path";
 import { test, expect } from "@playwright/test";
 import {
-  deleteConversation,
-  ensureMockLLMAgentProfile,
   ensureMockLLMProfileViaAPI,
-  resetMockLLM,
-  routeSessionApiKey,
   seedLocalStorage,
 } from "../utils/mock-llm-helpers";
 import {
   REPLAY_TRANSCRIPTS,
   SCRIPTED_ACP_AGENT,
-  configureScriptedAcpAgent,
-  deleteScriptedAcpAgent,
   expandAllSubagents,
   readRenderedSubagentTree,
   readStoredSubagentTree,
-  startConversation,
+  scriptedAcpRuns,
   waitForTurnsToEnd,
 } from "../utils/acp-subagents";
 
-const conversations: string[] = [];
+const runs = scriptedAcpRuns();
 
 test.describe.configure({ mode: "serial" });
 
@@ -57,14 +51,7 @@ test.describe("ACP sub-agent sessions, replayed", () => {
     await seedLocalStorage(page);
   });
 
-  test.afterAll(async ({ request }) => {
-    for (const id of conversations) {
-      await deleteConversation(request, id).catch(() => undefined);
-    }
-    await ensureMockLLMAgentProfile(request).catch(() => undefined);
-    await deleteScriptedAcpAgent(request).catch(() => undefined);
-    await resetMockLLM(request).catch(() => undefined);
-  });
+  test.afterAll(({ request }) => runs.cleanUp(request));
 
   for (const transcript of REPLAY_TRANSCRIPTS) {
     // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
@@ -73,13 +60,12 @@ test.describe("ACP sub-agent sessions, replayed", () => {
       request,
     }) => {
       test.setTimeout(180_000);
-      await configureScriptedAcpAgent(request, {
-        flags: ["--transcript", transcript],
-        subagents: true,
-      });
-      await routeSessionApiKey(page);
-      const conversationId = await startConversation(page, "Replay.");
-      conversations.push(conversationId);
+      const conversationId = await runs.start(
+        page,
+        request,
+        ["--transcript", transcript],
+        "Replay.",
+      );
       await waitForTurnsToEnd(request, conversationId);
 
       await expandAllSubagents(page);

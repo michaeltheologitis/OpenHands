@@ -20,24 +20,20 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import {
-  deleteConversation,
-  ensureMockLLMAgentProfile,
   ensureMockLLMProfile,
-  resetMockLLM,
   routeSessionApiKey,
   seedLocalStorage,
 } from "../utils/mock-llm-helpers";
 import {
+  COLLAPSED_TOGGLES,
   SCRIPTED_ACP_AGENT,
-  configureScriptedAcpAgent,
-  deleteScriptedAcpAgent,
   expandAllSubagents,
   probeScrollResponsiveness,
   readRenderedSubagentTree,
   readStoredEvents,
   readStoredSubagentTree,
+  scriptedAcpRuns,
   showSubagentCosts,
-  startConversation,
   waitForTurnsToEnd,
   writeFanoutTranscript,
 } from "../utils/acp-subagents";
@@ -49,7 +45,7 @@ const WAIT_FOR_STOP_S = "120";
 const FANOUT_INTERVAL_MS = "16";
 const SCROLL_LATENCY_LIMIT_MS = 1_000;
 
-const conversations: string[] = [];
+const runs = scriptedAcpRuns();
 
 const rowOf = (page: Page, sessionId: string) =>
   page.locator(
@@ -68,19 +64,6 @@ const rootCellIds = (page: Page) =>
         .filter((cell) => !cell.closest('[data-testid="subagent-row"]'))
         .map((cell) => cell.getAttribute("data-acp-tool-call-id")),
     );
-
-async function startScriptedConversation(
-  page: Page,
-  request: import("@playwright/test").APIRequestContext,
-  flags: string[],
-  message: string,
-) {
-  await configureScriptedAcpAgent(request, { flags, subagents: true });
-  await routeSessionApiKey(page);
-  const conversationId = await startConversation(page, message);
-  conversations.push(conversationId);
-  return conversationId;
-}
 
 test.describe.configure({ mode: "serial" });
 
@@ -107,14 +90,7 @@ test.describe("ACP sub-agent sessions", () => {
     await seedLocalStorage(page);
   });
 
-  test.afterAll(async ({ request }) => {
-    for (const id of conversations) {
-      await deleteConversation(request, id).catch(() => undefined);
-    }
-    await ensureMockLLMAgentProfile(request).catch(() => undefined);
-    await deleteScriptedAcpAgent(request).catch(() => undefined);
-    await resetMockLLM(request).catch(() => undefined);
-  });
+  test.afterAll(({ request }) => runs.cleanUp(request));
 
   // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
   // @spec SUB-004 — The root's flow shows only the root session's work
@@ -125,7 +101,7 @@ test.describe("ACP sub-agent sessions", () => {
   }) => {
     test.setTimeout(150_000);
     await ensureMockLLMProfile(page);
-    conversationId = await startScriptedConversation(
+    conversationId = await runs.start(
       page,
       request,
       [
@@ -278,7 +254,7 @@ test.describe("ACP sub-agent sessions", () => {
     request,
   }) => {
     test.setTimeout(120_000);
-    const id = await startScriptedConversation(
+    const id = await runs.start(
       page,
       request,
       ["--transcript", join(TRANSCRIPTS, "fallback-placement.jsonl")],
@@ -328,7 +304,7 @@ test.describe("ACP sub-agent sessions", () => {
       await mkdtemp(join(tmpdir(), "acp-fanout-")),
       { children: 50, cellsPerChild: 5 },
     );
-    const id = await startScriptedConversation(
+    const id = await runs.start(
       page,
       request,
       [
@@ -344,16 +320,15 @@ test.describe("ACP sub-agent sessions", () => {
     );
 
     // Expand every block and row as it appears, inside the page.
-    const expander = await page.evaluateHandle(() => {
-      const selector =
-        '[data-testid="subagent-block-toggle"][aria-expanded="false"], ' +
-        '[data-testid="subagent-row-toggle"][aria-expanded="false"]';
-      return window.setInterval(() => {
-        document
-          .querySelectorAll<HTMLElement>(selector)
-          .forEach((toggle) => toggle.click());
-      }, 100);
-    });
+    const expander = await page.evaluateHandle(
+      (selector) =>
+        window.setInterval(() => {
+          document
+            .querySelectorAll<HTMLElement>(selector)
+            .forEach((toggle) => toggle.click());
+        }, 100),
+      COLLAPSED_TOGGLES,
+    );
     const finished = waitForTurnsToEnd(request, id, { timeout: 180_000 });
     const probe = await probeScrollResponsiveness(page, finished);
 
