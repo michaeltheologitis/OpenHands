@@ -116,18 +116,23 @@ export const reconnect = (
   });
 
 interface MessageOptions {
-  /** The transcript the message is stored in; absent for the root's. */
-  transcript?: string;
   from: string;
   to: string;
   text: string;
+  /** The transcript it is stored in: by default its sender's, none for the root. */
+  transcript?: string;
 }
 
 /** An ACPSessionMessageEvent; ids name sessions verbatim (the root's real id). */
 export const message = (
   tick: number,
   messageId: string,
-  { transcript, from, to, text }: MessageOptions,
+  {
+    from,
+    to,
+    text,
+    transcript = from === ROOT_ACP_SESSION_ID ? undefined : from,
+  }: MessageOptions,
 ): ACPSessionMessageEvent => ({
   kind: "ACPSessionMessageEvent",
   id: nextId(),

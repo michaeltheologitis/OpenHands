@@ -233,7 +233,6 @@ describe("sub-agents under the call that spawned them", () => {
       text(4, "n2", "Reading the catalog.", { thought: true }),
       call(5, "c2", { session: "n2" }),
       message(6, "answer", {
-        transcript: "n2",
         from: "n2",
         to: ROOT_ID,
         text: "3cr, 0 prereqs — light\nCS101 has no prerequisites.",
@@ -268,7 +267,6 @@ describe("sub-agents under the call that spawned them", () => {
       call(3, "c2", { session: "n2" }),
       child(4, "n3", { parent: "n2", cell: "c2", title: "Read CS201" }),
       message(5, "task-n3", {
-        transcript: "n2",
         from: "n2",
         to: "n3",
         text: "Check the prerequisites of CS201.",

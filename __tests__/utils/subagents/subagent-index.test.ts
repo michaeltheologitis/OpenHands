@@ -104,13 +104,8 @@ describe("foldSubagentEvents", () => {
     const index = fold(
       child(1, "n2"),
       child(2, "n3"),
-      message(3, "m1", { transcript: "n3", from: "n3", to: "n2", text: "hi" }),
-      message(4, "m1", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "done",
-      }),
+      message(3, "m1", { from: "n3", to: "n2", text: "hi" }),
+      message(4, "m1", { from: "n2", to: ROOT_ID, text: "done" }),
       message(5, "task", { from: ROOT_ID, to: "n2", text: "Do n2." }),
     );
 
@@ -186,20 +181,10 @@ describe("foldSubagentEvents", () => {
   });
 
   it("keeps the newest version of a message when an older page arrives later", () => {
-    const newest = message(9, "m1", {
-      transcript: "n2",
-      from: "n2",
-      to: ROOT_ID,
-      text: "final",
-    });
+    const newest = message(9, "m1", { from: "n2", to: ROOT_ID, text: "final" });
 
     const index = foldSubagentEvents(fold(child(1, "n2"), newest), [
-      message(3, "m1", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "draft",
-      }),
+      message(3, "m1", { from: "n2", to: ROOT_ID, text: "draft" }),
     ]);
 
     expect(index.messages.get(messageKey("n2", "m1"))?.latest).toBe(newest);
@@ -213,12 +198,7 @@ describe("foldSubagentEvents", () => {
       child(1, "n2"),
       text(5, "n2", "thinking", { thought: true }),
       call(8, "c1", { session: "n2", status: "completed" }),
-      message(5, "m1", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "a",
-      }),
+      message(5, "m1", { from: "n2", to: ROOT_ID, text: "a" }),
       // An older page brings the call's start: the call moves up to it.
       call(3, "c1", { session: "n2" }),
     );
@@ -239,12 +219,7 @@ describe("foldSubagentEvents", () => {
 
     const index = foldSubagentEvents(first, [
       text(4, "n2", "check"),
-      message(5, "x", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "ok",
-      }),
+      message(5, "x", { from: "n2", to: ROOT_ID, text: "ok" }),
     ]);
 
     expect(transcriptOf(index, "n2")).toEqual([
@@ -257,19 +232,13 @@ describe("foldSubagentEvents", () => {
 
   it("upserts a message and keeps its place", () => {
     const revised = message(9, "m1", {
-      transcript: "n2",
       from: "n2",
       to: ROOT_ID,
       text: "final",
     });
     const index = fold(
       child(1, "n2"),
-      message(3, "m1", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "d",
-      }),
+      message(3, "m1", { from: "n2", to: ROOT_ID, text: "d" }),
       text(4, "n2", "after"),
       revised,
     );
@@ -303,25 +272,10 @@ describe("foldSubagentEvents", () => {
       child(2, "n2", { cell: "c1" }),
       call(3, "c2", { session: "n2" }),
       child(4, "n3", { parent: "n2", cell: "c2" }),
-      message(5, "task-n3", {
-        transcript: "n2",
-        from: "n2",
-        to: "n3",
-        text: "Do n3.",
-      }),
+      message(5, "task-n3", { from: "n2", to: "n3", text: "Do n3." }),
       call(6, "c3", { session: "n3" }),
-      message(7, "draft", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "d",
-      }),
-      message(8, "late-n3", {
-        transcript: "n2",
-        from: "n2",
-        to: "n3",
-        text: "More.",
-      }),
+      message(7, "draft", { from: "n2", to: ROOT_ID, text: "d" }),
+      message(8, "late-n3", { from: "n2", to: "n3", text: "More." }),
       call(9, "c2", { session: "n2", status: "completed" }),
     );
 
@@ -334,18 +288,8 @@ describe("foldSubagentEvents", () => {
 
   it("takes a child's answer from the newest message it sent", () => {
     const index = foldSubagentEvents(fold(child(1, "n2")), [
-      message(2, "draft", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "d",
-      }),
-      message(3, "final", {
-        transcript: "n2",
-        from: "n2",
-        to: ROOT_ID,
-        text: "f",
-      }),
+      message(2, "draft", { from: "n2", to: ROOT_ID, text: "d" }),
+      message(3, "final", { from: "n2", to: ROOT_ID, text: "f" }),
       message(4, "reply", {
         transcript: "n2",
         from: ROOT_ID,
