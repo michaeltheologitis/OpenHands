@@ -1,3 +1,4 @@
+import { replaceEqualDeep } from "@tanstack/react-query";
 import {
   compareTimestamps,
   ROOT_SESSION,
@@ -10,7 +11,6 @@ import {
   type SubagentPlacement,
   type SubagentRecord,
   type SubagentRecords,
-  type SubagentSummary,
 } from "./subagent-index";
 import { summarizeSubagents } from "./subagent-status";
 
@@ -70,39 +70,6 @@ const fallbackAnchor = (
     : { sessionId, at: record.firstAt, via: "announcement" };
 };
 
-const sameAnchor = (a: SubagentAnchor | null, b: SubagentAnchor | null) =>
-  a === b ||
-  (a !== null &&
-    b !== null &&
-    a.sessionId === b.sessionId &&
-    a.at === b.at &&
-    a.via === b.via);
-
-const samePending = (a: PendingSubagent, b: PendingSubagent) =>
-  a.sessionId === b.sessionId &&
-  a.reason === b.reason &&
-  a.missingId === b.missingId &&
-  a.parentSessionRef === b.parentSessionRef &&
-  sameAnchor(a.fallback, b.fallback);
-
-const sameSummary = (a: SubagentSummary, b: SubagentSummary) =>
-  (Object.keys(a) as (keyof SubagentSummary)[]).every(
-    (count) => a[count] === b[count],
-  );
-
-const sameId = (a: string, b: string) => a === b;
-
-/** `previous` when it holds equal items in the same order, else `next`. */
-const reuseList = <T>(
-  previous: readonly T[] | undefined,
-  next: readonly T[],
-  same: (a: T, b: T) => boolean,
-): readonly T[] =>
-  previous?.length === next.length &&
-  next.every((item, index) => same(previous[index], item))
-    ? previous
-    : next;
-
 /** `previous` when every entry of `next` is the same object, else `next`. */
 const reuseMap = <K, V>(
   previous: ReadonlyMap<K, V>,
@@ -115,17 +82,17 @@ const reuseMap = <K, V>(
   return previous;
 };
 
+/** `previous`'s list for each key whose list is equal, and so the map. */
 const reuseLists = <K, V>(
   previous: ReadonlyMap<K, readonly V[]>,
   next: Map<K, V[]>,
-  same: (a: V, b: V) => boolean,
 ): ReadonlyMap<K, readonly V[]> =>
   reuseMap(
     previous,
     new Map(
       [...next].map(([key, list]) => [
         key,
-        reuseList(previous.get(key), list, same),
+        replaceEqualDeep(previous.get(key), list),
       ]),
     ),
   );
@@ -176,20 +143,20 @@ export function placeSubagents(
   }
   anchors.forEach((list) => list.sort(byAt));
 
-  const byCell = reuseLists(previous.byCell, cells, sameId);
+  const byCell = reuseLists(previous.byCell, cells);
   const summaries = new Map(
-    [...byCell].map(([cellKey, sessionIds]) => {
-      const summary = summarizeSubagents(
-        sessionIds.map((id) => children.get(id)!),
-      );
-      const held = previous.cellSummaries.get(cellKey);
-      return [cellKey, held && sameSummary(held, summary) ? held : summary];
-    }),
+    [...byCell].map(([cellKey, sessionIds]) => [
+      cellKey,
+      replaceEqualDeep(
+        previous.cellSummaries.get(cellKey),
+        summarizeSubagents(sessionIds.map((id) => children.get(id)!)),
+      ),
+    ]),
   );
   const placement: SubagentPlacement = {
     byCell,
-    byAnchor: reuseLists(previous.byAnchor, anchors, sameAnchor),
-    pending: reuseList(previous.pending, pending, samePending),
+    byAnchor: reuseLists(previous.byAnchor, anchors),
+    pending: replaceEqualDeep(previous.pending, pending),
     cellSummaries: reuseMap(previous.cellSummaries, summaries),
   };
 
