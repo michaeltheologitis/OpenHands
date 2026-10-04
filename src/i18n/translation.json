@@ -8057,6 +8057,23 @@
     "uk": "Потрібна автентифікація",
     "ca": "Cal autenticació"
   },
+  "ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE": {
+    "en": "The agent refused an option",
+    "ja": "エージェントがオプションを拒否しました",
+    "zh-CN": "智能体拒绝了一个选项",
+    "zh-TW": "代理程式拒絕了一個選項",
+    "ko-KR": "에이전트가 옵션을 거부했습니다",
+    "no": "Agenten avviste et alternativ",
+    "ar": "رفض الوكيل خيارًا",
+    "de": "Der Agent hat eine Option abgelehnt",
+    "fr": "L'agent a refusé une option",
+    "it": "L'agente ha rifiutato un'opzione",
+    "pt": "O agente recusou uma opção",
+    "es": "El agente rechazó una opción",
+    "tr": "Ajan bir seçeneği reddetti",
+    "uk": "Агент відхилив параметр",
+    "ca": "L'agent ha rebutjat una opció"
+  },
   "ERROR$ACP_UPDATE_CREDENTIALS": {
     "en": "Update credentials",
     "ja": "認証情報を更新",

@@ -180,6 +180,22 @@ describe("ErrorMessageBanner", () => {
     ).toHaveTextContent("invalid x-api-key");
   });
 
+  it("heads a refused start-time option with its title and shows the agent's sentence", () => {
+    render(
+      <ErrorMessageBanner
+        message="unknown profile 'turbo'"
+        code="ACPConfigOptionRejected"
+      />,
+    );
+
+    expect(screen.getByTestId("error-message-banner-header")).toHaveTextContent(
+      "ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE",
+    );
+    expect(
+      screen.getByTestId("error-message-banner-content"),
+    ).toHaveTextContent("unknown profile 'turbo'");
+  });
+
   it("renders no header for an unknown or absent code", () => {
     render(<ErrorMessageBanner message="boom" code={null} />);
     expect(

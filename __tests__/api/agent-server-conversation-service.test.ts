@@ -867,6 +867,167 @@ describe("AgentServerConversationService", () => {
     });
   });
 
+  describe("ACP session controls", () => {
+    const mockPreviewAcpSession = vi.fn();
+    const mockSetAcpConfigOption = vi.fn();
+    const controls = {
+      available_commands: [{ name: "summarize", description: "Summarize" }],
+      config_options: [],
+    };
+
+    beforeEach(() => {
+      setRegisteredBackends([localBackend, cloudBackend]);
+      setActiveSelection({ backendId: localBackend.id });
+      mockGetSettings.mockResolvedValue({
+        agent_settings: { llm: { model: "gpt-4o" } },
+        conversation_settings: {},
+      });
+      mockGetSettingsForConversation.mockResolvedValue({
+        agentSettings: { llm: { model: "gpt-4o" } },
+        conversationSettings: {},
+        secretsEncrypted: true,
+      });
+      mockHttpPost.mockResolvedValue({
+        data: makeDirectConversation({ id: "conv-acp" }),
+      });
+      mockPreviewAcpSession.mockReset().mockResolvedValue(controls);
+      mockSetAcpConfigOption
+        .mockReset()
+        .mockResolvedValue({ applied: true, controls });
+      const client = mockConversationClient();
+      mockConversationClient.mockReturnValue({
+        ...client,
+        previewAcpSession: mockPreviewAcpSession,
+        setAcpConfigOption: mockSetAcpConfigOption,
+      });
+    });
+
+    const startBody = async (
+      options: Parameters<
+        typeof AgentServerConversationService.createConversation
+      >[0],
+    ) => {
+      mockHttpPost.mockClear();
+      await AgentServerConversationService.createConversation(options);
+      const body = { ...mockHttpPost.mock.calls[0][1] };
+      // A fresh id per start; the preview ignores it.
+      delete body.conversation_id;
+      return body;
+    };
+
+    it("sends picked option values with the start, and an otherwise identical body without them", async () => {
+      const launch = {
+        workingDirOverride: "/repo",
+        workspaceMode: "local_repo" as const,
+      };
+
+      const withValues = await startBody({
+        ...launch,
+        acpConfigOptions: { profile: "thorough" },
+      });
+      const withEmptyValues = await startBody({
+        ...launch,
+        acpConfigOptions: {},
+      });
+      const withoutValues = await startBody(launch);
+
+      expect(withValues.acp_config_options).toEqual({ profile: "thorough" });
+      expect(withEmptyValues).not.toHaveProperty("acp_config_options");
+      expect(JSON.stringify(withEmptyValues)).toBe(
+        JSON.stringify(withoutValues),
+      );
+      const { acp_config_options: _, ...rest } = withValues;
+      expect(JSON.stringify(rest)).toBe(JSON.stringify(withoutValues));
+    });
+
+    // @spec ASC-002 — A conversation starts with values the preview accepted
+    it.each([
+      [
+        "a profile launch",
+        { agentProfileId: "acp-profile", agentProfileKind: "acp" as const },
+      ],
+      ["an agent_settings launch", {}],
+    ])(
+      "previews with the body %s would start with, less its first message and user",
+      async (_label, profile) => {
+        const launch = {
+          workingDirOverride: "/repo",
+          workspaceMode: "new_worktree" as const,
+          ...profile,
+        };
+        const values = { profile: "thorough" };
+
+        await expect(
+          AgentServerConversationService.previewAcpSession({
+            ...launch,
+            acpConfigOptions: values,
+          }),
+        ).resolves.toEqual(controls);
+        const started = await startBody({
+          ...launch,
+          initialUserMsg: "Compare a and b",
+          acpConfigOptions: values,
+        });
+
+        const previewed = { ...mockPreviewAcpSession.mock.calls[0][0] };
+        delete previewed.conversation_id;
+        delete started.initial_message;
+        delete started.user_id;
+        expect(previewed).toEqual(started);
+        expect(previewed.acp_config_options).toEqual(values);
+      },
+    );
+
+    it("gives the preview the agent-server's start-up time", async () => {
+      await AgentServerConversationService.previewAcpSession({
+        acpConfigOptions: {},
+      });
+
+      expect(ConversationClient).toHaveBeenLastCalledWith(
+        expect.objectContaining({ timeout: 120_000 }),
+      );
+      expect(mockPreviewAcpSession.mock.calls[0][0]).not.toHaveProperty(
+        "acp_config_options",
+      );
+    });
+
+    it("sets a live option through the conversation client", async () => {
+      await expect(
+        AgentServerConversationService.setAcpConfigOption(
+          "conv-acp",
+          "profile",
+          "fast",
+        ),
+      ).resolves.toEqual({ applied: true, controls });
+
+      expect(mockSetAcpConfigOption).toHaveBeenCalledWith(
+        "conv-acp",
+        "profile",
+        "fast",
+      );
+    });
+
+    it("refuses previews and live sets on a Cloud backend", async () => {
+      setRegisteredBackends([cloudBackend]);
+      setActiveSelection({ backendId: cloudBackend.id, orgId: "org-1" });
+
+      await expect(
+        AgentServerConversationService.previewAcpSession({
+          acpConfigOptions: {},
+        }),
+      ).rejects.toThrow();
+      await expect(
+        AgentServerConversationService.setAcpConfigOption(
+          "c",
+          "profile",
+          "fast",
+        ),
+      ).rejects.toThrow();
+      expect(mockPreviewAcpSession).not.toHaveBeenCalled();
+      expect(mockSetAcpConfigOption).not.toHaveBeenCalled();
+    });
+  });
+
   describe("downloadConversation local branch", () => {
     beforeEach(() => {
       window.localStorage.clear();

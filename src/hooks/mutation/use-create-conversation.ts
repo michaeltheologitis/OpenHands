@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ACPConfigOptionValues } from "@openhands/typescript-client";
 import AgentServerConversationService from "#/api/conversation-service/agent-server-conversation-service.api";
 import { PluginSpec } from "#/api/conversation-service/agent-server-conversation-service.types";
 import { SuggestedTask } from "#/utils/types";
@@ -49,6 +50,8 @@ export interface CreateConversationVariables {
   // active AgentProfile (if any) is used so home-composed conversations
   // launch from the user's selected profile (#3727).
   agentProfileId?: string;
+  /** ACP config option values to start with; sent as acp_config_options. */
+  acpConfigOptions?: ACPConfigOptionValues;
   entryPoint?: string; // analytics only; not forwarded to the service
 }
 
@@ -101,6 +104,7 @@ export const useCreateConversation = () => {
         parentConversationId,
         agentType,
         agentProfileId,
+        acpConfigOptions,
       } = variables;
 
       // The active AgentProfile is the default launch profile for new
@@ -277,6 +281,7 @@ export const useCreateConversation = () => {
           workspaceMode,
           parentConversationId,
           agentType,
+          ...(acpConfigOptions ? { acpConfigOptions } : {}),
           ...(effectiveAgentProfileId
             ? {
                 agentProfileId: effectiveAgentProfileId,

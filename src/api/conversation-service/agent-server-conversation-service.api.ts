@@ -1,5 +1,8 @@
 import {
   ConversationSortOrder,
+  type ACPConfigOptionSetResponse,
+  type ACPConfigOptionValues,
+  type ACPSessionControls,
   type ForkConversationRequest,
   type LLMConfig,
   type VSCodeStatusResponse,
@@ -80,6 +83,11 @@ const DEFAULT_CONVERSATION_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 // machine or the packaged desktop app, where uvx may still be warming caches)
 // can exceed the client's 60s default timeout.
 const CREATE_CONVERSATION_TIMEOUT_MS = 5 * 60 * 1000;
+// The agent-server bounds an ACP agent's start-up at 90 s and then waits up to
+// 2 s for its commands; the margin covers the round trip.
+const ACP_PREVIEW_TIMEOUT_MS = 2 * 60 * 1000;
+const ACP_SESSION_CONTROLS_LOCAL_ONLY_MESSAGE =
+  "ACP session controls are available on local backends only.";
 const INVALID_CONVERSATION_RESPONSE_MESSAGE =
   "Unable to load conversations because the selected agent server returned " +
   "data this UI does not understand. Check the backend URL/session key and " +
@@ -414,6 +422,91 @@ export interface CreateConversationOptions {
   // generation uses this profile so both the agent and its title use the
   // same model.
   agentLlmProfileRef?: string | null;
+  /** ACP config option values applied after session/new, before the first prompt. */
+  acpConfigOptions?: ACPConfigOptionValues;
+}
+
+interface LocalStartConversationRequest {
+  /** The body POST /api/conversations takes, without user_id and acp_config_options. */
+  payload: Record<string, unknown>;
+  resolvedWorkspaceMode: WorkspaceMode;
+}
+
+export interface PreviewAcpSessionOptions {
+  workingDirOverride?: string;
+  workspaceMode?: WorkspaceMode;
+  agentProfileId?: string;
+  agentProfileKind?: AgentKind;
+  acpConfigOptions: ACPConfigOptionValues;
+}
+
+/** `{ acp_config_options }` when values were picked; nothing otherwise. */
+function acpConfigOptionsField(values: ACPConfigOptionValues | undefined) {
+  return values && Object.keys(values).length > 0
+    ? { acp_config_options: values }
+    : {};
+}
+
+/**
+ * The body a local start sends for these options, less `user_id` and
+ * `acp_config_options`, and the workspace mode it resolved. Every request
+ * that must launch the agent a start would launch builds its body here.
+ */
+async function buildLocalStartConversationRequest(
+  options: CreateConversationOptions,
+): Promise<LocalStartConversationRequest> {
+  const {
+    initialUserMsg,
+    conversationInstructions,
+    plugins,
+    metadata,
+    workingDirOverride,
+    workspaceMode,
+    parentConversationId,
+    agentProfileId,
+    agentProfileKind,
+    agentLlmProfileRef,
+  } = options;
+  const [settings, profiles] = await Promise.all([
+    SettingsService.getSettings(),
+    ProfilesService.listProfiles().catch(() => undefined),
+  ]);
+  const titleLlmProfile = resolveTitleLlmProfile(
+    settings.title_llm_profile,
+    profiles,
+    agentLlmProfileRef,
+  );
+  const conversationId = uuidv4();
+  const { workingDir, hooksProjectDir, isolated } =
+    await resolveNewConversationWorkspace({
+      conversationId,
+      workingDir: workingDirOverride,
+      selectedRepository: metadata?.selected_repository,
+      parentConversationId,
+    });
+  const resolvedWorkspaceMode =
+    workspaceMode ?? (workingDirOverride ? "local_repo" : "new_worktree");
+
+  // Use encrypted settings to avoid exposing secrets in the browser
+  const payload = await buildStartConversationRequestWithEncryptedSettings({
+    settings,
+    query: initialUserMsg,
+    conversationInstructions,
+    plugins,
+    conversationId,
+    // The agent-server rejects a parent in a different workspace, so callers
+    // launching a child must pass the parent's own `working_dir` as
+    // `workingDirOverride` (see `resolveConversationWorkingDir`). Servers
+    // older than 1.37.1 ignore the field and create an unlinked conversation.
+    parentConversationId,
+    workingDir,
+    hooksProjectDir,
+    worktree: !isolated && resolvedWorkspaceMode === "new_worktree",
+    agentProfileId,
+    agentProfileKind,
+    titleLlmProfile,
+  });
+  return { payload, resolvedWorkspaceMode };
 }
 
 class AgentServerConversationService {
@@ -463,13 +556,10 @@ class AgentServerConversationService {
       plugins,
       metadata,
       workingDirOverride,
-      workspaceMode,
       parentConversationId,
       agentType,
       sandboxId,
       agentProfileId,
-      agentProfileKind,
-      agentLlmProfileRef,
     } = options;
 
     if (getActiveBackend().backend.kind === "cloud") {
@@ -515,51 +605,15 @@ class AgentServerConversationService {
       return createCloudAppConversation(request);
     }
 
-    const [settings, profiles] = await Promise.all([
-      SettingsService.getSettings(),
-      ProfilesService.listProfiles().catch(() => undefined),
-    ]);
-    const titleLlmProfile = resolveTitleLlmProfile(
-      settings.title_llm_profile,
-      profiles,
-      agentLlmProfileRef,
-    );
-    const conversationId = uuidv4();
-    const { workingDir, hooksProjectDir, isolated } =
-      await resolveNewConversationWorkspace({
-        conversationId,
-        workingDir: workingDirOverride,
-        selectedRepository: metadata?.selected_repository,
-        parentConversationId,
-      });
-    const resolvedWorkspaceMode =
-      workspaceMode ?? (workingDirOverride ? "local_repo" : "new_worktree");
-
-    // Use encrypted settings to avoid exposing secrets in the browser
-    const payload = await buildStartConversationRequestWithEncryptedSettings({
-      settings,
-      query: initialUserMsg,
-      conversationInstructions,
-      plugins,
-      conversationId,
-      // The agent-server rejects a parent in a different workspace, so callers
-      // launching a child must pass the parent's own `working_dir` as
-      // `workingDirOverride` (see `resolveConversationWorkingDir`). Servers
-      // older than 1.37.1 ignore the field and create an unlinked conversation.
-      parentConversationId,
-      workingDir,
-      hooksProjectDir,
-      worktree: !isolated && resolvedWorkspaceMode === "new_worktree",
-      agentProfileId,
-      agentProfileKind,
-      titleLlmProfile,
-    });
+    const { payload, resolvedWorkspaceMode } =
+      await buildLocalStartConversationRequest(options);
 
     const telemetryDistinctId = await getTelemetryDistinctId();
     const data = await new ConversationClient(
       getAgentServerClientOptions({ timeout: CREATE_CONVERSATION_TIMEOUT_MS }),
     ).createConversation<DirectConversationInfo>({
       ...payload,
+      ...acpConfigOptionsField(options.acpConfigOptions),
       ...(telemetryDistinctId ? { user_id: telemetryDistinctId } : {}),
     });
     const localBackend = getEffectiveLocalBackend();
@@ -597,6 +651,41 @@ class AgentServerConversationService {
       created_at: data.created_at,
       updated_at: data.updated_at,
     };
+  }
+
+  /**
+   * What an ACP agent would offer (its slash commands and config options)
+   * before a conversation exists: POST /api/acp/preview with the body a start
+   * would send. Local backends only.
+   */
+  static async previewAcpSession(
+    options: PreviewAcpSessionOptions,
+  ): Promise<ACPSessionControls> {
+    if (getActiveBackend().backend.kind === "cloud") {
+      throw new Error(ACP_SESSION_CONTROLS_LOCAL_ONLY_MESSAGE);
+    }
+    const { acpConfigOptions, ...launch } = options;
+    const { payload } = await buildLocalStartConversationRequest(launch);
+    return new ConversationClient(
+      getAgentServerClientOptions({ timeout: ACP_PREVIEW_TIMEOUT_MS }),
+    ).previewAcpSession({
+      ...payload,
+      ...acpConfigOptionsField(acpConfigOptions),
+    });
+  }
+
+  /** Sets a live ACP session's config option; the agent's refusal is a 422. */
+  static async setAcpConfigOption(
+    conversationId: string,
+    configId: string,
+    value: string | boolean,
+  ): Promise<ACPConfigOptionSetResponse> {
+    if (getActiveBackend().backend.kind === "cloud") {
+      throw new Error(ACP_SESSION_CONTROLS_LOCAL_ONLY_MESSAGE);
+    }
+    return new ConversationClient(
+      getAgentServerClientOptions(),
+    ).setAcpConfigOption(conversationId, configId, value);
   }
 
   static async createLocalPlanningConversation(

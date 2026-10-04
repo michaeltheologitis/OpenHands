@@ -411,5 +411,36 @@ describe("EventService", () => {
       });
       expect(remoteSearchMock).toHaveBeenCalledWith({ limit: 100 });
     });
+
+    it("filters a local search by event kind", async () => {
+      useBackend(localBackend);
+      remoteSearchMock.mockResolvedValue({ items: [], next_page_id: null });
+
+      await EventService.searchEvents("conversation-local", null, null, {
+        kind: "openhands.sdk.event.acp_session_controls.ACPSessionControlsEvent",
+        sortOrder: "TIMESTAMP_DESC",
+        limit: 1,
+      });
+
+      expect(remoteSearchMock).toHaveBeenCalledWith({
+        limit: 1,
+        sort_order: "TIMESTAMP_DESC",
+        kind: "openhands.sdk.event.acp_session_controls.ACPSessionControlsEvent",
+      });
+    });
+
+    it("filters a cloud search by event kind in the query string", async () => {
+      callCloudProxyMock.mockResolvedValue({ items: [], next_page_id: null });
+
+      await EventService.searchEvents("conversation-cloud", null, null, {
+        kind: "ACPSessionControlsEvent",
+        limit: 1,
+      });
+
+      const { path } = callCloudProxyMock.mock.calls[0][0] as { path: string };
+      expect(new URL(path, "https://x").searchParams.get("kind")).toBe(
+        "ACPSessionControlsEvent",
+      );
+    });
   });
 });

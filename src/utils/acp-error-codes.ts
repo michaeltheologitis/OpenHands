@@ -9,6 +9,7 @@ export const ACP_AUTH_REQUIRED_CODE = "ACPAuthRequired";
 
 const ACP_ERROR_HEADER_KEYS: Record<string, I18nKey> = {
   ACPAuthRequired: I18nKey.ERROR$ACP_AUTH_REQUIRED_TITLE,
+  ACPConfigOptionRejected: I18nKey.ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE,
   // Spawn/init/prompt/usage-policy failures share the generic "Agent error"
   // header; their detail already carries the specific cause.
   ACPSpawnError: I18nKey.CHAT_INTERFACE$AGENT_ERROR_MESSAGE,
