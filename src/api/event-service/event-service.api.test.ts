@@ -11,6 +11,7 @@ const {
   remoteEventsListConstructorMock,
   remoteSearchMock,
   respondToConfirmationMock,
+  cancelAcpSessionMock,
 } = vi.hoisted(() => ({
   buildHttpBaseUrlMock: vi.fn(),
   callCloudProxyMock: vi.fn(),
@@ -22,6 +23,7 @@ const {
   remoteEventsListConstructorMock: vi.fn(),
   remoteSearchMock: vi.fn(),
   respondToConfirmationMock: vi.fn(),
+  cancelAcpSessionMock: vi.fn(),
 }));
 
 vi.mock("@openhands/typescript-client/clients", () => ({
@@ -32,6 +34,7 @@ vi.mock("@openhands/typescript-client/clients", () => ({
 
     respondToConfirmation = respondToConfirmationMock;
     getEventCount = getEventCountMock;
+    cancelAcpSession = cancelAcpSessionMock;
   },
 }));
 vi.mock("@openhands/typescript-client/events/remote-events-list", () => ({
@@ -154,6 +157,52 @@ describe("EventService", () => {
         { accept: true },
       );
       expect(callCloudProxyMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cancelAcpSession", () => {
+    // @spec SUB-007 — Stop is offered only for a running sub-agent that granted cancel on the live connection
+    it("cancelAcpSession posts to the conversation's runtime with its session key", async () => {
+      const runtimeUrl =
+        "https://runtime.example.com/base/api/conversations/conversation-1";
+      cancelAcpSessionMock.mockResolvedValue({
+        session_id: "n2",
+        requested: true,
+      });
+
+      await expect(
+        EventService.cancelAcpSession(
+          "conversation-1",
+          "n2",
+          runtimeUrl,
+          "session-key",
+        ),
+      ).resolves.toEqual({ session_id: "n2", requested: true });
+
+      expect(getAgentServerClientOptionsMock).toHaveBeenCalledWith({
+        conversationUrl: runtimeUrl,
+        sessionApiKey: "session-key",
+      });
+      expect(conversationClientConstructorMock).toHaveBeenCalledWith({
+        host: "http://local-client.example.com",
+        apiKey: "client-key",
+        workingDir: "workspace/project",
+      });
+      expect(cancelAcpSessionMock).toHaveBeenCalledWith("conversation-1", "n2");
+      expect(callCloudProxyMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects with the server's refusal as the client raised it", async () => {
+      const refusal = Object.assign(new Error("HTTP 409"), {
+        name: "HttpError",
+        status: 409,
+        response: { detail: "ACP session n2 does not accept cancel." },
+      });
+      cancelAcpSessionMock.mockRejectedValue(refusal);
+
+      await expect(
+        EventService.cancelAcpSession("conversation-1", "n2", null, null),
+      ).rejects.toBe(refusal);
     });
   });
 

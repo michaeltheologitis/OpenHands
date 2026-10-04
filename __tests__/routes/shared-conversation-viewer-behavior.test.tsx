@@ -14,6 +14,7 @@ import {
   type OpenHandsEvent,
   type SystemPromptEvent,
 } from "#/types/agent-server/core";
+import { call, child } from "../helpers/subagent-events";
 
 const mocks = vi.hoisted(() => ({
   useSharedConversation: vi.fn(),
@@ -46,21 +47,36 @@ vi.mock("#/hooks/use-infinite-scroll", () => ({
   useInfiniteScroll: (options: unknown) => mocks.useInfiniteScroll(options),
 }));
 
-vi.mock("#/components/conversation-events/chat/messages", () => ({
-  Messages: ({
-    messages,
-    allEvents,
-  }: {
-    messages: OpenHandsEvent[];
-    allEvents: OpenHandsEvent[];
-  }) => (
-    <section
-      data-testid="shared-messages"
-      data-renderable-event-ids={messages.map((event) => event.id).join(",")}
-      data-all-event-ids={allEvents.map((event) => event.id).join(",")}
-    />
-  ),
-}));
+vi.mock("#/components/conversation-events/chat/messages", async () => {
+  const { useContext } = await import("react");
+  const { SubagentHistoryContext, SubagentSourceContext, useSubagents } =
+    await import("#/components/conversation-events/chat/subagents/subagent-source");
+  return {
+    Messages: function MessagesProbe({
+      messages,
+      allEvents,
+    }: {
+      messages: OpenHandsEvent[];
+      allEvents: OpenHandsEvent[];
+    }) {
+      const source = useContext(SubagentSourceContext);
+      const historyComplete = useContext(SubagentHistoryContext);
+      const byCell = useSubagents((index) => index.placement.byCell);
+      return (
+        <section
+          data-testid="shared-messages"
+          data-renderable-event-ids={messages
+            .map((event) => event.id)
+            .join(",")}
+          data-all-event-ids={allEvents.map((event) => event.id).join(",")}
+          data-subagents-in-cells={[...byCell.values()].flat().join(",")}
+          data-read-only={String(source.readOnly === true)}
+          data-history-complete={String(historyComplete)}
+        />
+      );
+    },
+  };
+});
 
 vi.mock("#/components/shared/loading-spinner", () => ({
   LoadingSpinner: ({ size }: { size: "small" | "large" }) => (
@@ -453,5 +469,31 @@ describe("shared conversation viewer", () => {
     expect(mocks.useInfiniteScroll).toHaveBeenCalledWith(
       expect.objectContaining({ hasNextPage: false }),
     );
+  });
+
+  // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
+  it("nests sub-agents in a shared conversation, read-only", () => {
+    const cell = call(1, "c1");
+    const childCall = call(3, "c2", { session: "n2" });
+
+    renderViewer({
+      eventsState: {
+        data: {
+          pages: [
+            {
+              items: [cell, child(2, "n2", { cell: "c1" }), childCall],
+              next_page_id: "page-2",
+            },
+          ],
+        },
+        hasNextPage: true,
+      },
+    });
+
+    const messages = screen.getByTestId("shared-messages");
+    expect(messages).toHaveAttribute("data-renderable-event-ids", cell.id);
+    expect(messages).toHaveAttribute("data-subagents-in-cells", "n2");
+    expect(messages).toHaveAttribute("data-read-only", "true");
+    expect(messages).toHaveAttribute("data-history-complete", "false");
   });
 });

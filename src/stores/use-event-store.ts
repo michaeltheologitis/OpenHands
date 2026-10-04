@@ -12,6 +12,11 @@ import type {
   DeltaFrame,
   ItemStartedFrame,
 } from "#/types/agent-server/session-frames";
+import {
+  EMPTY_SUBAGENT_INDEX,
+  foldSubagentEvents,
+  type SubagentIndex,
+} from "#/utils/subagents/subagent-index";
 
 export type OHEvent = UIEvent;
 
@@ -68,6 +73,11 @@ export interface EventState {
    * should clear the accumulated events.
    */
   loadedConversationId: string | null;
+  /**
+   * ACP sub-agent sessions folded from `events`, by `foldSubagentEvents`, in
+   * the same `set` as `events` and `uiEvents`. Reset with them.
+   */
+  subagents: SubagentIndex;
   addEvent: (event: OHEvent) => void;
   /**
    * Bulk-insert events. Used for the initial REST history load and for
@@ -128,6 +138,7 @@ const appendEvent = (state: EventState, event: OHEvent): EventState => {
     events: [...state.events, event],
     eventIds: newEventIds,
     uiEvents: handleEventForUI(event, state.uiEvents),
+    subagents: foldSubagentEvents(state.subagents, [event]),
   };
 };
 
@@ -158,6 +169,7 @@ export const useEventStore = create<EventState>()((set) => ({
   eventIds: new Set(),
   uiEvents: [],
   loadedConversationId: null,
+  subagents: EMPTY_SUBAGENT_INDEX,
   addEvent: (event: OHEvent) => set((state) => applyAddEvent(state, event)),
   addEvents: (incoming: OHEvent[]) =>
     set((state) => {
@@ -166,14 +178,14 @@ export const useEventStore = create<EventState>()((set) => ({
       const eventIds = new Set(state.eventIds);
       const events = [...state.events];
       let uiEvents = [...state.uiEvents];
-      let added = false;
+      const added: OHEvent[] = [];
 
       for (const event of incoming) {
         const eventId = getEventId(event);
         const isDuplicate = eventId !== undefined && eventIds.has(eventId);
 
         if (!isDuplicate) {
-          added = true;
+          added.push(event);
           if (eventId !== undefined) {
             eventIds.add(eventId);
           }
@@ -182,7 +194,7 @@ export const useEventStore = create<EventState>()((set) => ({
         }
       }
 
-      if (!added) {
+      if (added.length === 0) {
         return state;
       }
 
@@ -191,6 +203,7 @@ export const useEventStore = create<EventState>()((set) => ({
         events,
         eventIds,
         uiEvents,
+        subagents: foldSubagentEvents(state.subagents, added),
       });
     }),
   clearEvents: () =>
@@ -198,6 +211,7 @@ export const useEventStore = create<EventState>()((set) => ({
       events: [],
       eventIds: new Set(),
       uiEvents: [],
+      subagents: EMPTY_SUBAGENT_INDEX,
       loadedConversationId: null,
     })),
   clearEventsForConversation: (conversationId: string | null) =>
@@ -205,6 +219,7 @@ export const useEventStore = create<EventState>()((set) => ({
       events: [],
       eventIds: new Set(),
       uiEvents: [],
+      subagents: EMPTY_SUBAGENT_INDEX,
       loadedConversationId: conversationId,
     })),
   openStreamingSlot: (frame: ItemStartedFrame, meta: StreamingSlotMeta = {}) =>
