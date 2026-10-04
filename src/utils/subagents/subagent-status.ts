@@ -115,7 +115,7 @@ export function formatSubagentCost(
   return currency ? `${amount} ${currency}` : amount;
 }
 
-export const EMPTY_SUBAGENT_SUMMARY: SubagentSummary = {
+const EMPTY_SUBAGENT_SUMMARY: SubagentSummary = {
   total: 0,
   running: 0,
   waiting: 0,

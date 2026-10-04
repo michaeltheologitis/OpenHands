@@ -7,7 +7,7 @@ import type {
 } from "#/utils/subagents/subagent-status";
 
 /** Plural keys: `_one` and `_other` exist in translation.json, not the base. */
-export const SUBAGENT_COUNT_I18N_KEY = "SUBAGENTS$COUNT";
+const SUBAGENT_COUNT_I18N_KEY = "SUBAGENTS$COUNT";
 export const SUBAGENT_TOOL_CALLS_I18N_KEY = "SUBAGENTS$TOOL_CALLS";
 export const SUBAGENTS_UNPLACED_I18N_KEY = "SUBAGENTS$UNPLACED";
 

@@ -36,7 +36,7 @@ export const SCRIPTED_ACP_AGENT: string | null = process.env.SCRIPTED_ACP_AGENT
   : null;
 
 /** The agent profile the scripted agent runs as. */
-export const SCRIPTED_ACP_PROFILE = "scripted-acp-subagents";
+const SCRIPTED_ACP_PROFILE = "scripted-acp-subagents";
 
 export interface ScriptedAcpAgentOptions {
   /** Flags after the script, e.g. `["--subagents", "--cancel-wait", "30"]`. */

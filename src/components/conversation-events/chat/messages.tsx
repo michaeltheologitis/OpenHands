@@ -33,17 +33,17 @@ interface MessagesProps {
 }
 
 const getLastEventId = (events: OpenHandsEvent[]) => events.at(-1)?.id;
+const getLastEvent = (events: OpenHandsEvent[]) => events.at(-1);
 
 /**
  * Stable across an ACP call's started → terminal replacement, so its card,
  * and the sub-agents under it, keep their expanded state when it completes.
  */
-export function renderKeyOf(event: OpenHandsEvent): string | undefined {
+function renderKeyOf(event: OpenHandsEvent): string | undefined {
   return isACPToolCallEvent(event)
     ? `acp-${toolCallKey(event.acp_session_id, event.tool_call_id)}`
     : event.id;
 }
-const getLastEvent = (events: OpenHandsEvent[]) => events.at(-1);
 
 export const Messages: React.FC<MessagesProps> = React.memo(
   ({ messages, allEvents }) => {
