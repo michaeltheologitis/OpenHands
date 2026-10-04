@@ -157,6 +157,93 @@ describe("conversation store", () => {
     });
   });
 
+  // @spec CX-001 — An App panel never shares the right side with the drawer or the overview
+  describe("App header panels", () => {
+    type Store = ReturnType<typeof useConversationStore.getState>;
+    type Step = [label: string, act: (store: Store) => void];
+    const openPanelA: Step = ["open panel A", (s) => s.openAppPanel("demo/a")];
+    const openPanelB: Step = ["open panel B", (s) => s.openAppPanel("demo/b")];
+    const openDrawer: Step = [
+      "open drawer",
+      (s) => {
+        s.setHasRightPanelToggled(true);
+        s.setIsRightPanelShown(true);
+      },
+    ];
+    const closeDrawer: Step = [
+      "close drawer",
+      (s) => s.setIsRightPanelShown(false),
+    ];
+    const openOverview: Step = [
+      "open overview",
+      (s) => s.setIsOverviewPanelShown(true),
+    ];
+    const closePanel: Step = ["close panel", (s) => s.closeAppPanel()];
+
+    it.each([
+      {
+        steps: [openPanelA, openDrawer],
+        expected: { activeAppPanel: null, isRightPanelShown: true },
+      },
+      {
+        steps: [openDrawer, openPanelA],
+        expected: { activeAppPanel: "demo/a", isRightPanelShown: false },
+      },
+      {
+        steps: [openOverview, openPanelA],
+        expected: { activeAppPanel: "demo/a", isOverviewPanelShown: false },
+      },
+      {
+        steps: [openPanelA, openOverview],
+        expected: { activeAppPanel: null, isOverviewPanelShown: true },
+      },
+      {
+        steps: [openPanelA, openPanelB],
+        expected: { activeAppPanel: "demo/b", isRightPanelShown: false },
+      },
+      {
+        steps: [openPanelA, closeDrawer],
+        expected: { activeAppPanel: "demo/a", isRightPanelShown: false },
+      },
+      {
+        steps: [openDrawer, openPanelA, closePanel],
+        expected: {
+          activeAppPanel: null,
+          isRightPanelShown: false,
+          isOverviewPanelShown: false,
+        },
+      },
+    ])(
+      "keeps one right-hand panel after $steps.0.0 then $steps.1.0",
+      ({ steps, expected }) => {
+        for (const [label, act] of steps) {
+          act(useConversationStore.getState());
+          const state = useConversationStore.getState();
+          const sharesTheRightSide =
+            state.activeAppPanel !== null &&
+            (state.isRightPanelShown || state.isOverviewPanelShown);
+          expect(sharesTheRightSide, `after ${label}`).toBe(false);
+        }
+        expect(useConversationStore.getState()).toMatchObject(expected);
+      },
+    );
+
+    it("opening a panel clears the drawer's toggled flag so the composer does not reopen it", () => {
+      openDrawer[1](useConversationStore.getState());
+
+      useConversationStore.getState().openAppPanel("demo/a");
+
+      expect(useConversationStore.getState()).toMatchObject({
+        hasRightPanelToggled: false,
+        isOverviewPanelPeeked: false,
+      });
+    });
+
+    it("starts with no App panel open", () => {
+      expect(useConversationStore.getState().activeAppPanel).toBeNull();
+    });
+  });
+
   it("appends and removes files and images while preserving unrelated entries", () => {
     const firstImage = new File(["a"], "first.png", { type: "image/png" });
     const secondImage = new File(["b"], "second.png", { type: "image/png" });

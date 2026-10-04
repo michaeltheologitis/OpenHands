@@ -58,6 +58,8 @@ interface ConversationState {
   conversationMode: ConversationMode;
   subConversationTaskId: string | null; // Task ID for cloud sub-conversation creation
   localPlanningConversationId: string | null;
+  /** The open App header panel; session-only, like the drawer. */
+  activeAppPanel: ConversationAppPanelKey | null;
 }
 
 interface ConversationActions {
@@ -95,6 +97,9 @@ interface ConversationActions {
   setSubConversationTaskId: (taskId: string | null) => void;
   setLocalPlanningConversationId: (conversationId: string | null) => void;
   setPlanContent: (planContent: string | null) => void;
+  /** Open an App panel; closes the drawer and the overview in the same update. */
+  openAppPanel: (key: ConversationAppPanelKey) => void;
+  closeAppPanel: () => void;
 }
 
 type ConversationStore = ConversationState & ConversationActions;
@@ -157,14 +162,28 @@ export const useConversationStore = create<ConversationStore>()(
       conversationMode: getInitialConversationMode(),
       subConversationTaskId: null,
       localPlanningConversationId: null,
+      activeAppPanel: null,
 
       // Actions
+      // @spec CX-001 — An App panel never shares the right side with the drawer or the overview
       setIsRightPanelShown: (isRightPanelShown) =>
-        set({ isRightPanelShown }, false, "setIsRightPanelShown"),
+        set(
+          isRightPanelShown
+            ? { isRightPanelShown, activeAppPanel: null }
+            : { isRightPanelShown },
+          false,
+          "setIsRightPanelShown",
+        ),
 
       setIsOverviewPanelShown: (isOverviewPanelShown) =>
         set(
-          { isOverviewPanelShown, isOverviewPanelPeeked: false },
+          isOverviewPanelShown
+            ? {
+                isOverviewPanelShown,
+                isOverviewPanelPeeked: false,
+                activeAppPanel: null,
+              }
+            : { isOverviewPanelShown, isOverviewPanelPeeked: false },
           false,
           "setIsOverviewPanelShown",
         ),
@@ -398,6 +417,24 @@ export const useConversationStore = create<ConversationStore>()(
 
       setPlanContent: (planContent) =>
         set({ planContent }, false, "setPlanContent"),
+
+      // `hasRightPanelToggled` is the drawer state a conversation restores,
+      // so it is cleared too; restoring it would reopen the drawer.
+      openAppPanel: (activeAppPanel) =>
+        set(
+          {
+            activeAppPanel,
+            isRightPanelShown: false,
+            hasRightPanelToggled: false,
+            isOverviewPanelShown: false,
+            isOverviewPanelPeeked: false,
+          },
+          false,
+          "openAppPanel",
+        ),
+
+      closeAppPanel: () =>
+        set({ activeAppPanel: null }, false, "closeAppPanel"),
     }),
     {
       name: "conversation-store",

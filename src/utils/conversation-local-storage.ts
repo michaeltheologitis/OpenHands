@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  ConversationAppPanelKey,
   ConversationTab,
   ConversationMode,
 } from "#/stores/conversation-store";
@@ -21,6 +22,13 @@ const CONVERSATION_STATE_UPDATED_EVENT = "conversation-state-updated";
 type ConversationStateUpdatedDetail = {
   conversationId: string;
 };
+
+export interface ConversationAppPanelTabState {
+  /** The tab last selected in this panel, or null for the default. */
+  selectedTab: string | null;
+  /** Tab ids the user unpinned from the row. */
+  unpinnedTabs: string[];
+}
 
 /**
  * Consolidated conversation state stored in a single localStorage key.
@@ -57,6 +65,12 @@ export interface ConversationState {
   filesTabOpenPaths?: string[];
   /** Currently selected path among `filesTabOpenPaths`, if any. */
   filesTabSelectedPath?: string | null;
+  /**
+   * Per App panel: its selected tab and unpinned tabs in this conversation.
+   * Entries for panels or tabs no longer registered are kept (the App may
+   * come back) and ignored when read.
+   */
+  appPanelTabs?: Record<ConversationAppPanelKey, ConversationAppPanelTabState>;
 }
 
 const DEFAULT_CONVERSATION_STATE: ConversationState = {
@@ -102,6 +116,32 @@ const REMOVED_CONVERSATION_TABS: ReadonlySet<string> = new Set([
 ]);
 
 const VALID_VIEW_MODES: ReadonlySet<ViewMode> = new Set(["rich", "plain"]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// @spec CX-003 — A panel's selected tab and pins are kept per conversation
+function sanitizeAppPanelTabs(
+  value: unknown,
+): ConversationState["appPanelTabs"] {
+  if (!isPlainObject(value)) return undefined;
+  const result: Record<string, ConversationAppPanelTabState> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isPlainObject(entry)) {
+      result[key] = {
+        selectedTab:
+          typeof entry.selectedTab === "string" ? entry.selectedTab : null,
+        unpinnedTabs: Array.isArray(entry.unpinnedTabs)
+          ? entry.unpinnedTabs.filter(
+              (tab): tab is string => typeof tab === "string",
+            )
+          : [],
+      };
+    }
+  }
+  return result;
+}
 
 function sanitizeStoredState(
   stored: Record<string, unknown>,
@@ -199,6 +239,13 @@ function sanitizeStoredState(
   ) {
     result = { ...result };
     delete result.filesTabSelectedPath;
+  }
+
+  if (result.appPanelTabs != null) {
+    const appPanelTabs = sanitizeAppPanelTabs(result.appPanelTabs);
+    result = { ...result };
+    if (appPanelTabs) result.appPanelTabs = appPanelTabs;
+    else delete result.appPanelTabs;
   }
 
   return result;
@@ -352,6 +399,10 @@ export function useConversationLocalStorageState(conversationId: string): {
     openPaths: string[],
     selectedPath: string | null,
   ) => void;
+  setAppPanelTabState?: (
+    key: ConversationAppPanelKey,
+    tabState: ConversationAppPanelTabState,
+  ) => void;
 } {
   const [state, setState] = useState<ConversationState>(() =>
     getConversationState(conversationId),
@@ -433,5 +484,13 @@ export function useConversationLocalStorageState(conversationId: string): {
         filesTabOpenPaths: openPaths,
         filesTabSelectedPath: selectedPath,
       }),
+    setAppPanelTabState: (key, tabState) => {
+      // Read the stored blob, not this render's copy, so a write for one
+      // panel never drops another panel's entry written since.
+      const current = shouldSkipPersistence(conversationId)
+        ? state.appPanelTabs
+        : getConversationState(conversationId).appPanelTabs;
+      updateState({ appPanelTabs: { ...current, [key]: tabState } });
+    },
   };
 }

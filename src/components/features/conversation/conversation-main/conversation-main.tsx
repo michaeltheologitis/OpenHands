@@ -13,6 +13,9 @@ import {
 import { SidebarMobileMenuToggle } from "#/components/features/sidebar/sidebar-mobile-menu-toggle";
 import { ConversationOverviewDrawer } from "../conversation-overview-drawer";
 import { useConversationOverviewDrawerOptional } from "../conversation-overview-drawer-context";
+import { useRegisteredAppPanel } from "#/components/features/canvas-extensions/canvas-extensions-runtime";
+import { useOptionalConversationId } from "#/hooks/use-conversation-id";
+import { ConversationAppPanel } from "../conversation-app-panel/conversation-app-panel";
 
 function getDesktopTabPanelClass(isRightPanelShown: boolean) {
   return isRightPanelShown
@@ -23,7 +26,12 @@ function getDesktopTabPanelClass(isRightPanelShown: boolean) {
 export function ConversationMain() {
   const isMobile = useBreakpoint();
   const isSidebarRailHidden = useBreakpoint(SIDEBAR_RAIL_COLLAPSE_MAX_WIDTH);
-  const { isRightPanelShown } = useConversationStore();
+  const { isRightPanelShown, activeAppPanel } = useConversationStore();
+  const { conversationId } = useOptionalConversationId();
+  // A key whose App is gone (disabled, re-activating) reads as closed.
+  const appPanel = useRegisteredAppPanel(activeAppPanel ?? null);
+  // @spec CX-001 — the drawer's column shows the drawer or one App panel
+  const isRightColumnOpen = isRightPanelShown || appPanel !== null;
   const overviewDrawer = useConversationOverviewDrawerOptional();
   const isSecondaryDrawerOpen = Boolean(overviewDrawer?.section);
 
@@ -74,7 +82,7 @@ export function ConversationMain() {
           style={
             !isMobile
               ? {
-                  width: isRightPanelShown ? `${leftWidth}%` : "100%",
+                  width: isRightColumnOpen ? `${leftWidth}%` : "100%",
                   transitionProperty:
                     isDragging || isSecondaryDrawerOpen ? "none" : "width",
                 }
@@ -95,39 +103,53 @@ export function ConversationMain() {
           </div>
           <div className="flex-1 min-h-0 flex flex-col">
             <ChatInterfaceWrapper
-              isRightPanelShown={!isMobile && isRightPanelShown}
+              isRightPanelShown={!isMobile && isRightColumnOpen}
             />
           </div>
         </div>
 
         {/* Resize Handle - only shown on desktop when right panel is visible */}
-        {!isMobile && isRightPanelShown && (
+        {!isMobile && isRightColumnOpen && (
           <ResizeHandle onMouseDown={handleMouseDown} isDragging={isDragging} />
         )}
 
         {/* Right panel: desktop side drawer. Mobile opens Files/Tools via /panel route. */}
         {!isMobile && (
           <div
+            data-testid="conversation-right-column"
             className={cn(
               "transition-all duration-300 ease-in-out overflow-hidden",
-              getDesktopTabPanelClass(isRightPanelShown),
+              getDesktopTabPanelClass(isRightColumnOpen),
             )}
             style={{
-              width: isRightPanelShown ? `${rightWidth}%` : "0%",
+              width: isRightColumnOpen ? `${rightWidth}%` : "0%",
               transitionProperty: isDragging ? "opacity, transform" : "all",
             }}
           >
             <div className="flex h-full w-full flex-col">
               <div className="flex flex-col flex-1 min-h-0 bg-surface border-l border-border overflow-hidden">
+                {/* The drawer stays mounted behind an App panel, so the
+                    terminal keeps its session. */}
                 <div
-                  data-testid="tabs-pane-header"
-                  className="flex shrink-0 flex-col border-b border-border"
+                  className="flex flex-1 min-h-0 flex-col"
+                  hidden={appPanel !== null}
                 >
-                  <ConversationTabs isPanelResizing={isDragging} />
+                  <div
+                    data-testid="tabs-pane-header"
+                    className="flex shrink-0 flex-col border-b border-border"
+                  >
+                    <ConversationTabs isPanelResizing={isDragging} />
+                  </div>
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <ConversationTabContent />
+                  </div>
                 </div>
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <ConversationTabContent />
-                </div>
+                {appPanel && conversationId ? (
+                  <ConversationAppPanel
+                    conversationId={conversationId}
+                    panel={appPanel}
+                  />
+                ) : null}
               </div>
             </div>
           </div>

@@ -1,14 +1,24 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SidebarMobileNavProvider } from "#/components/features/sidebar/sidebar-mobile-nav-context";
+import { NavigationProvider } from "#/context/navigation-context";
+import CanvasExtensionsService from "#/api/canvas-extensions-service";
+import {
+  DEMO_PANEL_KEY,
+  PanelAppsRuntime,
+  installPanelApps,
+  uninstallPanelApps,
+} from "../../../helpers/canvas-extension-panels";
 
 // Mutable mock state for controlling breakpoint
 let mockIsMobile = false;
 let mockIsRightPanelShown = false;
+let mockActiveAppPanel: string | null = null;
 let mockLeftWidth = 50;
 
 // Track ChatInterface unmount via vi.fn()
 const chatInterfaceUnmount = vi.fn();
+const tabContentUnmount = vi.fn();
 
 vi.mock("#/hooks/use-breakpoint", () => ({
   useBreakpoint: () => mockIsMobile,
@@ -25,9 +35,11 @@ vi.mock("#/hooks/use-resizable-panels", () => ({
   }),
 }));
 
-vi.mock("#/stores/conversation-store", () => ({
+vi.mock("#/stores/conversation-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#/stores/conversation-store")>()),
   useConversationStore: () => ({
     isRightPanelShown: mockIsRightPanelShown,
+    activeAppPanel: mockActiveAppPanel,
   }),
 }));
 
@@ -47,8 +59,32 @@ vi.mock("#/components/features/chat/chat-interface", () => {
 
 vi.mock(
   "#/components/features/conversation/conversation-tabs/conversation-tab-content/conversation-tab-content",
+  () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const React = require("react");
+    return {
+      ConversationTabContent: () => {
+        React.useEffect(() => () => tabContentUnmount(), []);
+        return <div data-testid="tab-content" />;
+      },
+    };
+  },
+);
+
+vi.mock(
+  "#/components/features/conversation/conversation-app-panel/conversation-app-panel",
   () => ({
-    ConversationTabContent: () => <div data-testid="tab-content" />,
+    ConversationAppPanel: ({
+      conversationId,
+      panel,
+    }: {
+      conversationId: string;
+      panel: { key: string };
+    }) => (
+      <div data-testid="app-panel">
+        {conversationId} {panel.key}
+      </div>
+    ),
   }),
 );
 
@@ -153,5 +189,74 @@ describe("ConversationMain - Layout Transition Stability", () => {
 
     expect(chatInterfaceUnmount).not.toHaveBeenCalled();
     expect(screen.getByTestId("chat-interface")).toBeInTheDocument();
+  });
+});
+
+// @spec CX-001 — An App panel never shares the right side with the drawer or the overview
+describe("ConversationMain - App header panels", () => {
+  function renderWithPanels() {
+    const ui = () => (
+      <NavigationProvider
+        value={{
+          currentPath: "/conversations/conv-1",
+          conversationId: "conv-1",
+          isNavigating: false,
+          navigate: vi.fn(),
+        }}
+      >
+        <PanelAppsRuntime>
+          <SidebarMobileNavProvider>
+            <ConversationMain />
+          </SidebarMobileNavProvider>
+        </PanelAppsRuntime>
+      </NavigationProvider>
+    );
+    const rendered = render(ui());
+    return { rerender: () => rendered.rerender(ui()) };
+  }
+
+  const rightColumn = () => screen.getByTestId("conversation-right-column");
+
+  beforeEach(() => {
+    mockIsMobile = false;
+    mockIsRightPanelShown = false;
+    mockActiveAppPanel = null;
+    mockLeftWidth = 40;
+    tabContentUnmount.mockClear();
+    installPanelApps();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    uninstallPanelApps();
+  });
+
+  it("shows an open App panel in the drawer's column, keeping the drawer's content mounted but hidden", async () => {
+    mockIsRightPanelShown = true;
+    const { rerender } = renderWithPanels();
+    expect(rightColumn()).toHaveStyle({ width: "60%" });
+
+    mockIsRightPanelShown = false;
+    mockActiveAppPanel = DEMO_PANEL_KEY;
+    rerender();
+
+    expect(await screen.findByTestId("app-panel")).toHaveTextContent(
+      `conv-1 ${DEMO_PANEL_KEY}`,
+    );
+    expect(rightColumn()).toHaveStyle({ width: "60%" });
+    expect(screen.getByTestId("tab-content")).not.toBeVisible();
+    expect(tabContentUnmount).not.toHaveBeenCalled();
+  });
+
+  it("leaves the column closed for a panel that is not registered", async () => {
+    mockActiveAppPanel = "uninstalled-app/panel";
+    renderWithPanels();
+    await waitFor(() =>
+      expect(CanvasExtensionsService.fetchBundle).toHaveBeenCalled(),
+    );
+
+    expect(rightColumn()).toHaveStyle({ width: "0%" });
+    expect(screen.queryByTestId("app-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tab-content")).toBeVisible();
   });
 });
