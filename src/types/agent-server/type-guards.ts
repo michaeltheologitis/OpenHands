@@ -34,6 +34,11 @@ import {
 } from "./core/events/conversation-state-event";
 import { HookExecutionEvent } from "./core/events/hook-execution-event";
 import { ACPToolCallEvent } from "./core/events/acp-tool-call-event";
+import {
+  ACPSessionMessageEvent,
+  ACPSessionTextEvent,
+  ACPSubagentEvent,
+} from "./core/events/acp-subagent-event";
 import { StreamingDeltaEvent } from "./core/events/streaming-delta-event";
 import { SystemPromptEvent } from "./core/events/system-event";
 import { CondensationEvent } from "./core/events/condensation-event";
@@ -285,6 +290,27 @@ export const isACPToolCallEvent = (
   event: OpenHandsEvent,
 ): event is ACPToolCallEvent =>
   "kind" in event && event.kind === "ACPToolCallEvent";
+
+/** An ACP tool call made inside a sub-agent session, not the root's. */
+export const isSubagentToolCallEvent = (
+  event: OpenHandsEvent,
+): event is ACPToolCallEvent & { acp_session_id: string } =>
+  isACPToolCallEvent(event) && typeof event.acp_session_id === "string";
+
+export const isACPSubagentEvent = (
+  event: OpenHandsEvent,
+): event is ACPSubagentEvent =>
+  "kind" in event && event.kind === "ACPSubagentEvent";
+
+export const isACPSessionMessageEvent = (
+  event: OpenHandsEvent,
+): event is ACPSessionMessageEvent =>
+  "kind" in event && event.kind === "ACPSessionMessageEvent";
+
+export const isACPSessionTextEvent = (
+  event: OpenHandsEvent,
+): event is ACPSessionTextEvent =>
+  "kind" in event && event.kind === "ACPSessionTextEvent";
 
 export const isStreamingDeltaEvent = (
   event: OpenHandsEvent,
