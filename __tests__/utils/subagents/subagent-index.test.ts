@@ -572,13 +572,10 @@ describe("foldSubagentEvents", () => {
 
   it("ignores events from the planning agent", () => {
     const planning = { ...child(2, "n2"), isFromPlanningAgent: true };
+    const main = { ...child(2, "n2"), isFromPlanningAgent: false };
 
     expect(fold(planning)).toBe(EMPTY_SUBAGENT_INDEX);
-    expect(
-      fold({ ...child(2, "n2"), isFromPlanningAgent: false }).children.has(
-        "n2",
-      ),
-    ).toBe(true);
+    expect(fold(main).children.has("n2")).toBe(true);
   });
 
   it("refuses to recurse into a parent loop", () => {
