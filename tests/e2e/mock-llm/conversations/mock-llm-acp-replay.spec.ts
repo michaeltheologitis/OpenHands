@@ -1,6 +1,7 @@
 /**
  * Mock-LLM E2E test: replay recorded ACP streams through the real agent-server
- * and check that the chat nests every sub-agent as the agent-server stored it.
+ * and check that the agent-server stored sub-agents and the chat nests every
+ * one as it stored it.
  *
  * One test per transcript named by `OH_ACP_REPLAY_TRANSCRIPTS` (paths joined
  * by the platform's path delimiter); skipped when it is unset. Each transcript
@@ -70,9 +71,14 @@ test.describe("ACP sub-agent sessions, replayed", () => {
 
       await expandAllSubagents(page);
 
-      expect(await readRenderedSubagentTree(page)).toEqual(
-        await readStoredSubagentTree(request, conversationId),
-      );
+      const rendered = await readRenderedSubagentTree(page);
+      const stored = await readStoredSubagentTree(request, conversationId);
+
+      expect(
+        stored.length,
+        "the agent-server stored no sub-agent for this transcript",
+      ).toBeGreaterThan(0);
+      expect(rendered).toEqual(stored);
     });
   }
 });
