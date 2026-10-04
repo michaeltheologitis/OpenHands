@@ -584,25 +584,25 @@ describe("buildSubagentIndex", () => {
   });
 });
 
-describe("anchorsForParent", () => {
-  const placed = [{ sessionId: "n2", at: at(5), via: "message" as const }];
-  const pending = [
-    {
-      sessionId: "n3",
-      reason: "parent-call" as const,
-      missingId: "c9",
-      parentSessionRef: ROOT_SESSION,
-      fallback: { sessionId: "n3", at: at(2), via: "announcement" as const },
-    },
-    {
-      sessionId: "n4",
-      reason: "parent-session" as const,
-      missingId: "n7",
-      parentSessionRef: "n7",
-      fallback: null,
-    },
-  ];
+const placed = [{ sessionId: "n2", at: at(5), via: "message" as const }];
+const pending = [
+  {
+    sessionId: "n3",
+    reason: "parent-call" as const,
+    missingId: "c9",
+    parentSessionRef: ROOT_SESSION,
+    fallback: { sessionId: "n3", at: at(2), via: "announcement" as const },
+  },
+  {
+    sessionId: "n4",
+    reason: "parent-session" as const,
+    missingId: "n7",
+    parentSessionRef: "n7",
+    fallback: null,
+  },
+];
 
+describe("anchorsForParent", () => {
   it("adds the fallbacks of children whose spawning call never turned up, once history is complete", () => {
     expect(anchorsForParent(placed, pending, ROOT_SESSION, false)).toBe(placed);
     expect(anchorsForParent(placed, pending, ROOT_SESSION, true)).toEqual([
@@ -611,7 +611,9 @@ describe("anchorsForParent", () => {
     ]);
     expect(anchorsForParent(placed, pending, "n2", true)).toBe(placed);
   });
+});
 
+describe("unplacedGroups", () => {
   // @spec SUB-003 — A sub-agent whose parent session is not in the conversation is shown apart, never in the root's flow
   it("groups children whose parent session is missing by that parent", () => {
     expect(
