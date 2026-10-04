@@ -236,4 +236,21 @@ describe("sub-agents under the call that spawned them", () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
+
+  // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
+  it("says earlier activity is loading while the cell's start is missing", () => {
+    const cell = call(9, "c1", { status: "completed" });
+    seed(cell, child(8, "n2", { cell: "c1" }));
+
+    const { unmount } = renderCell(cell, false);
+    expect(screen.getByTestId("subagent-loading-earlier")).toHaveTextContent(
+      "Loading earlier sub-agent activity…",
+    );
+    unmount();
+
+    renderCell(cell, true);
+    expect(
+      screen.queryByTestId("subagent-loading-earlier"),
+    ).not.toBeInTheDocument();
+  });
 });

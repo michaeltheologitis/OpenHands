@@ -32333,6 +32333,23 @@
     "uk": "Не вдалося розмістити {{count}} субагентів: їхнього батьківського сеансу {{parent}} немає в цій розмові.",
     "ca": "No s'han pogut situar {{count}} subagents: la seva sessió pare {{parent}} no és en aquesta conversa."
   },
+  "SUBAGENTS$LOADING_EARLIER": {
+    "en": "Loading earlier sub-agent activity…",
+    "ja": "以前のサブエージェントのアクティビティを読み込み中…",
+    "zh-CN": "正在加载更早的子代理活动…",
+    "zh-TW": "正在載入較早的子代理活動…",
+    "ko-KR": "이전 하위 에이전트 활동을 불러오는 중…",
+    "no": "Laster tidligere underagentaktivitet…",
+    "it": "Caricamento dell'attività precedente dei sottoagenti…",
+    "pt": "Carregando atividade anterior dos subagentes…",
+    "es": "Cargando actividad anterior de los subagentes…",
+    "ar": "جارٍ تحميل نشاط الوكلاء الفرعيين السابق…",
+    "fr": "Chargement de l'activité antérieure des sous-agents…",
+    "tr": "Önceki alt ajan etkinliği yükleniyor…",
+    "de": "Frühere Unteragenten-Aktivität wird geladen…",
+    "uk": "Завантаження попередньої активності субагентів…",
+    "ca": "S'està carregant l'activitat anterior dels subagents…"
+  },
   "ONBOARDING$TITLE": {
     "en": "Welcome to OpenHands",
     "ja": "OpenHands へようこそ",
