@@ -43,6 +43,19 @@ describe("getSubagentStatus", () => {
     });
   });
 
+  it.each([
+    [
+      "the agent's own snapshot without a state",
+      child(1, "n2", { state: null }),
+    ],
+    [
+      "a reconnect snapshot that still carries a state",
+      child(1, "n2", { state: "running", source: "environment" }),
+    ],
+  ])("reads %s as unconfirmed", (_case, latest) => {
+    expect(getSubagentStatus(recordOf(latest)).category).toBe("unconfirmed");
+  });
+
   it("reads a reconnect with nothing confirmed loaded as unconfirmed", () => {
     expect(getSubagentStatus(recordOf(reconnect(2, "n2")))).toEqual({
       category: "unconfirmed",

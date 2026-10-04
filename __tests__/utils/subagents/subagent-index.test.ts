@@ -18,6 +18,7 @@ import {
   call,
   child,
   message,
+  reconnect,
   ROOT_ACP_SESSION_ID as ROOT_ID,
   text,
 } from "../../helpers/subagent-events";
@@ -69,6 +70,16 @@ describe("foldSubagentEvents", () => {
     expect(index.placement.byCell.get(toolCallKey("n2", "c1"))).toEqual(["n5"]);
   });
 
+  it("orders a cell's children by announcement when an older page brings an earlier one", () => {
+    const newestPage = fold(call(1, "c1"), child(5, "n3", { cell: "c1" }));
+
+    const index = foldSubagentEvents(newestPage, [
+      child(2, "n2", { cell: "c1" }),
+    ]);
+
+    expect(index.placement.byCell.get(rootCell("c1"))).toEqual(["n2", "n3"]);
+  });
+
   it("keeps tool calls of different sessions with the same id apart", () => {
     const rootDone = call(5, "c1", { status: "completed" });
     const index = fold(
@@ -87,6 +98,32 @@ describe("foldSubagentEvents", () => {
     ]);
   });
 
+  it("keeps messages and routes of different transcripts apart", () => {
+    const index = fold(
+      child(1, "n2"),
+      child(2, "n3"),
+      message(3, "m1", { transcript: "n3", from: "n3", to: "n2", text: "hi" }),
+      message(4, "m1", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "done",
+      }),
+      message(5, "task", { from: ROOT_ID, to: "n2", text: "Do n2." }),
+    );
+
+    expect(index.messages.get(messageKey("n3", "m1"))?.latest.text).toBe("hi");
+    expect(index.messages.get(messageKey("n2", "m1"))?.latest.text).toBe(
+      "done",
+    );
+    expect(index.placement.byAnchor.get(ROOT_SESSION)).toContainEqual({
+      sessionId: "n2",
+      at: at(5),
+      via: "message",
+    });
+    expect(toolCallKey("n", "2c1")).not.toBe(toolCallKey("n2", "c1"));
+  });
+
   // @spec SUB-002 — Without a loaded spawning call, a sub-agent renders at its parent's message to it, else at its announcement
   it("places a child without a spawning call at its parent's message, else at its announcement", () => {
     const index = fold(
@@ -101,6 +138,7 @@ describe("foldSubagentEvents", () => {
       { sessionId: "n3", at: at(3), via: "announcement" },
       { sessionId: "n2", at: at(5), via: "message" },
     ]);
+    expect(index.needsOlderHistory).toBe(false);
   });
 
   it("keeps the newest snapshot when an older page arrives later", () => {
@@ -114,6 +152,58 @@ describe("foldSubagentEvents", () => {
 
     expect(index.children.get("n2")?.latest).toBe(newest);
     expect(index.children.get("n2")?.firstAt).toBe(at(2));
+  });
+
+  it("takes the later arrival of two snapshots with one timestamp", () => {
+    const later = child(2, "n2", { state: "idle", stopReason: "end_turn" });
+
+    expect(fold(child(2, "n2"), later).children.get("n2")?.latest).toBe(later);
+  });
+
+  it("keeps the newest confirmed snapshot across a reconnect, whichever page brings it", () => {
+    const running = child(1, "n2");
+    const reconnected = foldSubagentEvents(fold(running), [reconnect(5, "n2")]);
+    const waiting = child(3, "n2", { state: "requires_action" });
+
+    const olderPage = foldSubagentEvents(reconnected, [waiting]);
+
+    expect(reconnected.children.get("n2")?.lastConfirmed).toBe(running);
+    expect(olderPage.children.get("n2")?.lastConfirmed).toBe(waiting);
+    expect(olderPage.children.get("n2")?.latest.source).toBe("environment");
+  });
+
+  it("holds a child known only from reconnect snapshots as never confirmed", () => {
+    const index = foldSubagentEvents(fold(reconnect(2, "n2")), [
+      reconnect(4, "n2"),
+    ]);
+
+    expect(index.children.get("n2")).toMatchObject({
+      lastConfirmed: null,
+      firstAt: at(2),
+    });
+  });
+
+  it("keeps the newest version of a message when an older page arrives later", () => {
+    const newest = message(9, "m1", {
+      transcript: "n2",
+      from: "n2",
+      to: ROOT_ID,
+      text: "final",
+    });
+
+    const index = foldSubagentEvents(fold(child(1, "n2"), newest), [
+      message(3, "m1", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "draft",
+      }),
+    ]);
+
+    expect(index.messages.get(messageKey("n2", "m1"))?.latest).toBe(newest);
+    expect(transcriptOf(index, "n2")).toEqual([
+      ["message", messageKey("n2", "m1"), at(3)],
+    ]);
   });
 
   it("orders a child's transcript by first event, ties by arrival", () => {
@@ -135,6 +225,31 @@ describe("foldSubagentEvents", () => {
       ["tool_call", toolCallKey("n2", "c1"), at(3)],
       ["text", "thinking", at(5)],
       ["message", messageKey("n2", "m1"), at(5)],
+    ]);
+  });
+
+  it("keeps every entry of a child's transcript across folds, whatever its kind", () => {
+    const first = fold(
+      child(1, "n2"),
+      text(2, "n2", "plan"),
+      call(3, "x", { session: "n2" }),
+    );
+
+    const index = foldSubagentEvents(first, [
+      text(4, "n2", "check"),
+      message(5, "x", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "ok",
+      }),
+    ]);
+
+    expect(transcriptOf(index, "n2")).toEqual([
+      ["text", "plan", at(2)],
+      ["tool_call", toolCallKey("n2", "x"), at(3)],
+      ["text", "check", at(4)],
+      ["message", messageKey("n2", "x"), at(5)],
     ]);
   });
 
@@ -215,6 +330,32 @@ describe("foldSubagentEvents", () => {
     expect(index.stats.get("n3")).toEqual({ toolCalls: 1, answerKey: null });
   });
 
+  it("takes a child's answer from the newest message it sent", () => {
+    const index = foldSubagentEvents(fold(child(1, "n2")), [
+      message(2, "draft", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "d",
+      }),
+      message(3, "final", {
+        transcript: "n2",
+        from: "n2",
+        to: ROOT_ID,
+        text: "f",
+      }),
+      message(4, "reply", {
+        transcript: "n2",
+        from: ROOT_ID,
+        to: "n2",
+        text: "thanks",
+      }),
+      text(5, "n2", "wrapping up"),
+    ]);
+
+    expect(index.stats.get("n2")?.answerKey).toBe(messageKey("n2", "final"));
+  });
+
   it("waits for a parent session that is not loaded", () => {
     const index = fold(call(1, "c1"), child(5, "n3", { parent: "n2" }));
 
@@ -249,9 +390,50 @@ describe("foldSubagentEvents", () => {
     expect(index.needsOlderHistory).toBe(true);
   });
 
+  it("places a waiting child once the older page with its spawning call arrives", () => {
+    const newestPage = fold(
+      child(1, "n2"),
+      text(2, "n2", "thinking"),
+      child(5, "n3", { parent: "n2", cell: "c2" }),
+    );
+
+    const index = foldSubagentEvents(newestPage, [
+      call(3, "c2", { session: "n2" }),
+    ]);
+
+    expect(
+      newestPage.placement.pending.map(({ sessionId }) => sessionId),
+    ).toEqual(["n3"]);
+    expect(index.placement.byCell.get(toolCallKey("n2", "c2"))).toEqual(["n3"]);
+    expect(index.placement.pending).toEqual([]);
+  });
+
+  it("moves a child to its parent's message to it, and to an earlier one an older page brings", () => {
+    const announced = fold(child(2, "n2"), child(3, "n3"));
+
+    const tasked = foldSubagentEvents(announced, [
+      message(6, "task", { from: ROOT_ID, to: "n2", text: "Do n2." }),
+    ]);
+    const olderPage = foldSubagentEvents(tasked, [
+      message(4, "first", { from: ROOT_ID, to: "n2", text: "Start n2." }),
+    ]);
+
+    expect(tasked.placement.byAnchor.get(ROOT_SESSION)).toEqual([
+      { sessionId: "n3", at: at(3), via: "announcement" },
+      { sessionId: "n2", at: at(6), via: "message" },
+    ]);
+    expect(olderPage.placement.byAnchor.get(ROOT_SESSION)?.[1]).toEqual({
+      sessionId: "n2",
+      at: at(4),
+      via: "message",
+    });
+  });
+
   // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
   it("needs older history until every spawning call's start is loaded", () => {
     const newestPage = fold(
+      call(2, "c2"),
+      child(3, "n3", { cell: "c2" }),
       call(9, "c1", { status: "completed" }),
       child(8, "n2", { cell: "c1", state: "idle" }),
     );
@@ -263,8 +445,22 @@ describe("foldSubagentEvents", () => {
     expect(complete.needsOlderHistory).toBe(false);
   });
 
+  it.each(["pending", "in_progress"] as const)(
+    "takes a %s event as the spawning call's start",
+    (status) => {
+      const index = fold(
+        call(1, "c1", { status }),
+        child(2, "n2", { cell: "c1" }),
+      );
+
+      expect(index.needsOlderHistory).toBe(false);
+    },
+  );
+
   it("needs older history for a transcript whose session was never announced in the loaded pages", () => {
-    const index = fold(call(1, "c1"), text(3, "n7", "still busy"));
+    const index = foldSubagentEvents(fold(call(1, "c1")), [
+      text(3, "n7", "still busy"),
+    ]);
 
     expect(index.needsOlderHistory).toBe(true);
     expect(
@@ -297,6 +493,40 @@ describe("foldSubagentEvents", () => {
       before.placement.cellSummaries.get(rootCell("c1")),
     );
     expect(after.version).toBeGreaterThan(before.version);
+  });
+
+  it("keeps a child's transcript and stats when one of its calls completes", () => {
+    const before = fold(child(1, "n2"), call(2, "x", { session: "n2" }));
+
+    const after = foldSubagentEvents(before, [
+      call(3, "x", { session: "n2", status: "completed" }),
+    ]);
+
+    expect(after.toolCalls.get(toolCallKey("n2", "x"))?.latest.status).toBe(
+      "completed",
+    );
+    expect(after.transcripts.get("n2")).toBe(before.transcripts.get("n2"));
+    expect(after.stats.get("n2")).toBe(before.stats.get("n2"));
+  });
+
+  it("returns the same index for an older snapshot that changes nothing", () => {
+    const before = fold(child(1, "n2"), child(5, "n2", { state: "idle" }));
+
+    expect(foldSubagentEvents(before, [child(3, "n2")])).toBe(before);
+  });
+
+  it("keeps the placement when recomputing it changes nothing", () => {
+    const before = fold(
+      call(1, "c1"),
+      child(2, "n2", { cell: "c1" }),
+      child(3, "n3"),
+      child(4, "n4", { cell: "c9" }),
+    );
+
+    const after = foldSubagentEvents(before, [call(5, "c5")]);
+
+    expect(after.toolCalls).not.toBe(before.toolCalls);
+    expect(after.placement).toBe(before.placement);
   });
 
   it("does not recompute placement for a cost-only snapshot", () => {
@@ -336,6 +566,7 @@ describe("foldSubagentEvents", () => {
     } as MessageEvent;
 
     expect(foldSubagentEvents(before, [userMessage])).toBe(before);
+    expect(fold(userMessage).needsOlderHistory).toBe(false);
     expect(foldSubagentEvents(before, [])).toBe(before);
   });
 
@@ -343,6 +574,11 @@ describe("foldSubagentEvents", () => {
     const planning = { ...child(2, "n2"), isFromPlanningAgent: true };
 
     expect(fold(planning)).toBe(EMPTY_SUBAGENT_INDEX);
+    expect(
+      fold({ ...child(2, "n2"), isFromPlanningAgent: false }).children.has(
+        "n2",
+      ),
+    ).toBe(true);
   });
 
   it("refuses to recurse into a parent loop", () => {
