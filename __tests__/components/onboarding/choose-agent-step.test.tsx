@@ -4,8 +4,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACTIVE_AGENT_PROFILE_OPTION_ID,
   AgentOptionIcon,
   ChooseAgentStep,
+  type OnboardingAgentChoice,
   type OnboardingAgentId,
 } from "#/components/features/onboarding/steps/choose-agent-step";
 import SettingsService from "#/api/settings-service/settings-service.api";
@@ -15,7 +17,10 @@ import {
 } from "#/constants/acp-providers";
 import { I18nKey } from "#/i18n/declaration";
 
-function renderStep(initial: OnboardingAgentId = "openhands") {
+function renderStep(
+  initial: OnboardingAgentChoice = "openhands",
+  props: Partial<React.ComponentProps<typeof ChooseAgentStep>> = {},
+) {
   const onSelect = vi.fn();
   const onNext = vi.fn();
   render(
@@ -28,6 +33,7 @@ function renderStep(initial: OnboardingAgentId = "openhands") {
         selectedAgentId={initial}
         onSelect={onSelect}
         onNext={onNext}
+        {...props}
       />
     </QueryClientProvider>,
   );
@@ -262,6 +268,30 @@ describe("ChooseAgentStep", () => {
         }
       ).agent_settings_diff?.acp_server,
     ).toBe("codex");
+  });
+
+  it("offers the active agent profile first and keeps it on Next without saving settings", async () => {
+    const save = vi.spyOn(SettingsService, "saveSettings");
+    const { onNext } = renderStep(ACTIVE_AGENT_PROFILE_OPTION_ID, {
+      activeProfile: { name: "deep_reasoner", agent_kind: "acp" },
+    });
+    const user = userEvent.setup();
+
+    const [first] = screen.getAllByRole("radio");
+    expect(first).toHaveAttribute(
+      "data-testid",
+      `onboarding-agent-option-${ACTIVE_AGENT_PROFILE_OPTION_ID}`,
+    );
+    expect(first).toHaveAttribute("aria-checked", "true");
+    expect(first).toHaveTextContent("deep_reasoner");
+    expect(
+      screen.getByTestId("onboarding-agent-option-openhands"),
+    ).toHaveAttribute("aria-checked", "false");
+
+    await user.click(screen.getByTestId("onboarding-agent-next"));
+
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("does not advance when the save mutation fails", async () => {

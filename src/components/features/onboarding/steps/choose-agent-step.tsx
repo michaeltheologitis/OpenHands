@@ -7,10 +7,12 @@ import { I18nKey } from "#/i18n/declaration";
 import { cn } from "#/utils/utils";
 import { useSaveSettings } from "#/hooks/mutation/use-save-settings";
 import {
+  ACP_CUSTOM_PRESET_KEY,
   ACP_PROVIDER_FALLBACK_ICON,
   ACP_PROVIDERS,
   buildAcpAgentSettingsDiff,
 } from "#/constants/acp-providers";
+import type { AgentProfileSummary } from "#/api/agent-profiles-service/agent-profiles-service.api";
 import {
   AgentBrandIcon,
   type AgentBrandIconKind,
@@ -21,11 +23,18 @@ import {
 } from "#/utils/custom-toast-handlers";
 import { retrieveAxiosErrorMessage } from "#/utils/retrieve-axios-error-message";
 
+/** The option that keeps the already-active agent profile as it is. */
+export const ACTIVE_AGENT_PROFILE_OPTION_ID = "active-profile";
+
 export type OnboardingAgentId =
   | "openhands"
   | "claude-code"
   | "codex"
   | "gemini-cli";
+
+export type OnboardingAgentChoice =
+  | OnboardingAgentId
+  | typeof ACTIVE_AGENT_PROFILE_OPTION_ID;
 
 function getAgentOptionIcon(id: string): AgentBrandIconKind {
   if (id === "openhands") return "openhands";
@@ -64,17 +73,36 @@ export function AgentOptionIcon({ id, muted }: { id: string; muted: boolean }) {
 }
 
 interface AgentOption {
-  id: OnboardingAgentId;
+  id: OnboardingAgentChoice;
   label: string;
   descriptionKey: I18nKey;
+  iconId?: string;
 }
+
+type ActiveAgentProfile = Pick<AgentProfileSummary, "name" | "agent_kind">;
 
 // Onboarding tile list is *derived* from the ACP registry so adding a
 // new provider (or changing a display name) only needs one edit in
 // ``acp-providers.ts``. The OpenHands tile is the only synthetic
 // entry — it isn't an ACP provider, just the canonical default.
-function getAgentOptions(): AgentOption[] {
+function getAgentOptions(
+  activeProfile: ActiveAgentProfile | null,
+): AgentOption[] {
+  const activeProfileOptions: AgentOption[] = activeProfile
+    ? [
+        {
+          id: ACTIVE_AGENT_PROFILE_OPTION_ID,
+          label: activeProfile.name,
+          descriptionKey: I18nKey.ONBOARDING$AGENT_ACTIVE_PROFILE_DESCRIPTION,
+          iconId:
+            activeProfile.agent_kind === "openhands"
+              ? "openhands"
+              : ACP_CUSTOM_PRESET_KEY,
+        },
+      ]
+    : [];
   return [
+    ...activeProfileOptions,
     {
       id: "openhands",
       label: "OpenHands",
@@ -89,14 +117,20 @@ function getAgentOptions(): AgentOption[] {
 }
 
 interface ChooseAgentStepProps {
-  selectedAgentId: OnboardingAgentId;
-  onSelect: (agentId: OnboardingAgentId) => void;
+  selectedAgentId: OnboardingAgentChoice;
+  /** An active agent profile onboarding does not own, offered as the first option. */
+  activeProfile?: ActiveAgentProfile | null;
+  /** Holds Next until the active profile is known, so it cannot be replaced unseen. */
+  isActiveProfileLoading?: boolean;
+  onSelect: (agentId: OnboardingAgentChoice) => void;
   onBack?: () => void;
   onNext: () => void;
 }
 
 export function ChooseAgentStep({
   selectedAgentId,
+  activeProfile = null,
+  isActiveProfileLoading = false,
   onSelect,
   onBack,
   onNext,
@@ -105,6 +139,10 @@ export function ChooseAgentStep({
   const { mutate: saveSettings, isPending: isSaving } = useSaveSettings();
 
   const handleNext = () => {
+    if (selectedAgentId === ACTIVE_AGENT_PROFILE_OPTION_ID) {
+      onNext();
+      return;
+    }
     // The diff builder seeds the preferred default model (Vertex-safe for
     // Gemini) when none is passed.
     const diff = buildAcpAgentSettingsDiff(selectedAgentId);
@@ -150,7 +188,7 @@ export function ChooseAgentStep({
         aria-label={t(I18nKey.ONBOARDING$AGENT_TITLE)}
         className="flex flex-col gap-3"
       >
-        {getAgentOptions().map((option) => {
+        {getAgentOptions(activeProfile).map((option) => {
           const isSelected = option.id === selectedAgentId;
           return (
             <button
@@ -170,7 +208,10 @@ export function ChooseAgentStep({
             >
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <div className="flex min-w-0 items-center gap-2">
-                  <AgentOptionIcon id={option.id} muted={false} />
+                  <AgentOptionIcon
+                    id={option.iconId ?? option.id}
+                    muted={false}
+                  />
                   <span className="truncate text-base font-normal text-contrast">
                     {option.label}
                   </span>
@@ -215,7 +256,7 @@ export function ChooseAgentStep({
           testId="onboarding-agent-next"
           type="button"
           variant="primary"
-          isDisabled={isSaving}
+          isDisabled={isSaving || isActiveProfileLoading}
           onClick={handleNext}
         >
           {isSaving ? t(I18nKey.SETTINGS$SAVING) : t(I18nKey.ONBOARDING$NEXT)}
