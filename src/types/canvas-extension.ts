@@ -109,6 +109,39 @@ export interface CanvasExtensionAgentServerRequest {
   headers?: Record<string, string>;
 }
 
+export type CanvasExtensionAppBackendErrorReason =
+  | "no-ingress"
+  | "not-ready"
+  | "session-refused"
+  | "unsupported-backend";
+
+export interface CanvasExtensionAppBackendError {
+  reason: CanvasExtensionAppBackendErrorReason;
+  /** Localized sentence, the one the host shows in the container. */
+  message: string;
+}
+
+export interface CanvasExtensionAppBackendFrameOptions {
+  /** Path on the App's backend below its ingress root; "/" by default; may carry a query string. */
+  path?: string;
+  /** Accessible name of the frame. */
+  title: string;
+  /** Called once if the frame cannot be shown. */
+  onError?: (error: CanvasExtensionAppBackendError) => void;
+}
+
+export interface CanvasExtensionAppBackendHost {
+  /**
+   * Show the App's own backend in a sandboxed frame filling the container.
+   * The frame is the `<iframe>` appended to the container, kept there (also
+   * across session refreshes) until the returned disposer runs.
+   */
+  mountFrame: (
+    container: HTMLElement,
+    options: CanvasExtensionAppBackendFrameOptions,
+  ) => CanvasExtensionDispose;
+}
+
 export interface CanvasExtensionHost {
   readonly apiVersion: typeof CANVAS_EXTENSION_HOST_API_VERSION;
   readonly extension: Readonly<{
@@ -126,11 +159,14 @@ export interface CanvasExtensionHost {
     mount: CanvasExtensionPageMount,
   ) => CanvasExtensionDispose;
   navigate: (path: string) => void;
+  /** Requests to the owning agent-server's API; each may take up to 60 s. */
   agentServer: {
     request: <T = unknown>(
       request: CanvasExtensionAgentServerRequest,
     ) => Promise<T>;
   };
+  /** The App's own backend, through the agent-server's App ingress. */
+  readonly appBackend: CanvasExtensionAppBackendHost;
 }
 
 export interface CanvasExtensionModule {

@@ -1,4 +1,7 @@
-import { AgentServerClient } from "@openhands/typescript-client/clients";
+import {
+  AgentServerClient,
+  CanvasExtensionsClient,
+} from "@openhands/typescript-client/clients";
 import { getAgentServerClientOptions } from "#/api/agent-server-client-options";
 import { isSdkHttpStatusError } from "#/api/agent-server-compatibility";
 import {
@@ -13,6 +16,11 @@ import type {
 } from "#/types/canvas-extension";
 
 const CANVAS_EXTENSIONS_BASE_PATH = "/api/canvas-extensions";
+/**
+ * How long a request to an App's owning agent-server may take, including
+ * `host.agentServer.request`; an App backend start can take 30 s.
+ */
+const CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS = 60_000;
 const REMOTE_EXTENSION_SOURCE_PATTERN =
   /^(?:github:|https?:\/\/|git:\/\/|file:\/\/|[\w.-]+@[\w.-]+:)/i;
 
@@ -74,7 +82,28 @@ function getClientForBackend(backend: Backend): AgentServerClient {
   return new AgentServerClient({
     host: backend.host,
     ...(backend.apiKey ? { apiKey: backend.apiKey } : {}),
-    timeout: 60000,
+    timeout: CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS,
+  });
+}
+
+export type AppBackendSession = Awaited<
+  ReturnType<CanvasExtensionsClient["createAppBackendSession"]>
+>;
+
+function getAppBackendClient(
+  backend: Backend,
+  ingressUrl: string,
+): CanvasExtensionsClient {
+  if (isNoBackend(backend) || backend.kind === "cloud") {
+    throw new CanvasExtensionsUnsupportedError(
+      isNoBackend(backend) ? "no-backend" : "cloud-backend",
+    );
+  }
+  return new CanvasExtensionsClient({
+    host: backend.host,
+    ...(backend.apiKey ? { apiKey: backend.apiKey } : {}),
+    timeout: CANVAS_EXTENSION_AGENT_SERVER_REQUEST_TIMEOUT_MS,
+    appBackendIngressUrl: ingressUrl,
   });
 }
 
@@ -181,6 +210,38 @@ class CanvasExtensionsService {
       `${installedExtensionPath(name)}/panels/${encodeURIComponent(panelId)}/icon`,
       { responseType: "blob" },
     );
+  }
+
+  /**
+   * Mint an App backend session on the agent-server's App ingress origin
+   * (POST {ingress}/app-backends/{name}/session with the session key); the
+   * browser keeps its cookie for that App's frames.
+   */
+  static async createAppBackendSession(
+    name: string,
+    backend: Backend,
+    ingressUrl: string,
+    signal?: AbortSignal,
+  ): Promise<AppBackendSession> {
+    return getAppBackendClient(backend, ingressUrl).createAppBackendSession(
+      name,
+      signal,
+    );
+  }
+
+  /** Revoke an App's backend session; best-effort, failures are logged. */
+  static async revokeAppBackendSession(
+    name: string,
+    backend: Backend,
+    ingressUrl: string,
+  ): Promise<void> {
+    try {
+      await getAppBackendClient(backend, ingressUrl).revokeAppBackendSession(
+        name,
+      );
+    } catch (error) {
+      console.warn("Canvas App backend session revoke failed", error);
+    }
   }
 
   static async requestAgentServer<T = unknown>(
