@@ -4,7 +4,10 @@ import { useSaveSettings } from "#/hooks/mutation/use-save-settings";
 import { useSettings } from "#/hooks/query/use-settings";
 import { AvailableLanguages } from "#/i18n";
 import { DEFAULT_SETTINGS } from "#/services/settings";
-import { setTelemetryConsent } from "#/services/telemetry";
+import {
+  isTelemetryAvailable,
+  setTelemetryConsent,
+} from "#/services/telemetry";
 import { BrandButton } from "#/components/features/settings/brand-button";
 import { SettingsSwitch } from "#/components/features/settings/settings-switch";
 import { SettingsInput } from "#/components/features/settings/settings-input";
@@ -35,6 +38,7 @@ export function AppSettingsScreen() {
   const { data: settings, isLoading } = useSettings();
   const activeBackend = useActiveBackend();
   const isCloudBackend = activeBackend.backend.kind === "cloud";
+  const canReportTelemetry = isTelemetryAvailable();
   const { data: llmProfiles, isLoading: areLlmProfilesLoading } =
     useLlmProfiles();
   const freeModels = useFreeModels();
@@ -110,7 +114,10 @@ export function AppSettingsScreen() {
     saveSettings(
       {
         language,
-        ...(!isCloudBackend && { user_consents_to_analytics: enableAnalytics }),
+        ...(!isCloudBackend &&
+          canReportTelemetry && {
+            user_consents_to_analytics: enableAnalytics,
+          }),
         enable_sound_notifications: enableSoundNotifications,
         git_user_name: gitUserName,
         git_user_email: gitUserEmail,
@@ -118,7 +125,9 @@ export function AppSettingsScreen() {
       },
       {
         onSuccess: () => {
-          void setTelemetryConsent(enableAnalytics ? "granted" : "denied");
+          if (canReportTelemetry) {
+            void setTelemetryConsent(enableAnalytics ? "granted" : "denied");
+          }
           displaySuccessToast(t(I18nKey.SETTINGS$SAVED));
         },
         onError: (error) => {
@@ -199,22 +208,24 @@ export function AppSettingsScreen() {
 
           <ThemeInput />
 
-          <SettingsSwitch
-            testId="enable-analytics-switch"
-            name={isCloudBackend ? undefined : "enable-analytics-switch"}
-            defaultIsToggled={
-              isCloudBackend
-                ? true
-                : (settings.user_consents_to_analytics ?? true)
-            }
-            isToggled={isCloudBackend ? true : undefined}
-            isDisabled={isCloudBackend}
-            onToggle={
-              isCloudBackend ? undefined : checkIfAnalyticsSwitchHasChanged
-            }
-          >
-            {t(I18nKey.ANALYTICS$SEND_ANONYMOUS_DATA)}
-          </SettingsSwitch>
+          {canReportTelemetry ? (
+            <SettingsSwitch
+              testId="enable-analytics-switch"
+              name={isCloudBackend ? undefined : "enable-analytics-switch"}
+              defaultIsToggled={
+                isCloudBackend
+                  ? true
+                  : (settings.user_consents_to_analytics ?? true)
+              }
+              isToggled={isCloudBackend ? true : undefined}
+              isDisabled={isCloudBackend}
+              onToggle={
+                isCloudBackend ? undefined : checkIfAnalyticsSwitchHasChanged
+              }
+            >
+              {t(I18nKey.ANALYTICS$SEND_ANONYMOUS_DATA)}
+            </SettingsSwitch>
+          ) : null}
 
           <SettingsSwitch
             testId="enable-sound-notifications-switch"

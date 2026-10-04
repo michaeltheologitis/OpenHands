@@ -15,7 +15,10 @@ import {
   BaseModalDescription,
 } from "#/components/shared/modals/confirmation-modals/base-modal";
 import { BrandButton } from "#/components/features/settings/brand-button";
-import { setTelemetryConsent } from "#/services/telemetry";
+import {
+  isTelemetryAvailable,
+  setTelemetryConsent,
+} from "#/services/telemetry";
 
 interface TelemetryConsentBannerProps {
   onChoice?: (granted: boolean) => void;
@@ -122,7 +125,12 @@ export function TelemetryConsentBanner({
 }: TelemetryConsentBannerProps) {
   const { backend } = useActiveBackend();
 
-  if (getLockedCloudHost() !== null || backend.kind !== "local") return null;
+  if (
+    getLockedCloudHost() !== null ||
+    backend.kind !== "local" ||
+    !isTelemetryAvailable()
+  )
+    return null;
 
   return <LocalTelemetryConsentBanner backend={backend} onChoice={onChoice} />;
 }

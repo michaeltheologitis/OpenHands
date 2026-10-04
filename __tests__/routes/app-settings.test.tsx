@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppSettingsScreen from "#/routes/app-settings";
 import SettingsService from "#/api/settings-service/settings-service.api";
 import { MOCK_DEFAULT_USER_SETTINGS } from "#/mocks/handlers";
@@ -54,6 +54,10 @@ describe("AppSettingsScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     activeBackendState.kind = "local";
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("renders the OSS application settings form", async () => {
@@ -130,6 +134,49 @@ describe("AppSettingsScreen", () => {
       );
     });
   });
+
+  it.each([
+    { build: "a build that reports", doNotTrack: "", recordsConsent: true },
+    {
+      build: "a build with VITE_DO_NOT_TRACK=1",
+      doNotTrack: "1",
+      recordsConsent: false,
+    },
+  ])(
+    "shows and records analytics consent only in $build",
+    async ({ doNotTrack, recordsConsent }) => {
+      vi.stubEnv("VITE_DO_NOT_TRACK", doNotTrack);
+      localStorage.clear();
+      const saveSettingsSpy = vi
+        .spyOn(SettingsService, "saveSettings")
+        .mockResolvedValue(true);
+      vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+        buildSettings({ user_consents_to_analytics: null }),
+      );
+
+      renderAppSettingsScreen();
+
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByTestId("enable-sound-notifications-switch"),
+      );
+      expect(screen.queryByTestId("enable-analytics-switch") !== null).toBe(
+        recordsConsent,
+      );
+      await user.click(screen.getByTestId("submit-button"));
+      await waitFor(() =>
+        expect(screen.getByTestId("submit-button")).toBeDisabled(),
+      );
+
+      expect(saveSettingsSpy).toHaveBeenCalledOnce();
+      expect(saveSettingsSpy.mock.calls[0][0].user_consents_to_analytics).toBe(
+        recordsConsent ? true : undefined,
+      );
+      expect(localStorage.getItem("openhands-telemetry-consent")).toBe(
+        recordsConsent ? "granted" : null,
+      );
+    },
+  );
 
   it("saves updated git author details in OSS mode", async () => {
     const saveSettingsSpy = vi

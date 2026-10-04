@@ -49,6 +49,7 @@ vi.mock("#/hooks/mutation/use-save-settings", () => ({
 
 vi.mock("#/services/telemetry", () => ({
   setTelemetryConsent: (...args: unknown[]) => setTelemetryConsentMock(...args),
+  isTelemetryAvailable: () => true,
 }));
 
 describe("TelemetryConsentBanner", () => {

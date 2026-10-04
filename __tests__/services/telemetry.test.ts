@@ -47,6 +47,7 @@ import {
   getTelemetryDistinctId,
   getTelemetryDistinctIdForConsentSync,
   initializePostHogClient,
+  isTelemetryAvailable,
   isTelemetryEnabled,
   setTelemetryBackendContext,
   setTelemetryCloudContext,
@@ -512,6 +513,54 @@ describe("Telemetry Service", () => {
         "canvas_install",
         expect.any(Object),
       );
+    });
+  });
+
+  describe("isTelemetryAvailable", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.doUnmock("../../config/defaults.json");
+      vi.resetModules();
+    });
+
+    it("is available in a build with a key and no do-not-track", () => {
+      expect(isTelemetryAvailable()).toBe(true);
+    });
+
+    it.each([
+      [
+        "built with VITE_DO_NOT_TRACK=1",
+        () => vi.stubEnv("VITE_DO_NOT_TRACK", "1"),
+      ],
+      [
+        "served with the runtime do-not-track global",
+        () => {
+          (
+            window as unknown as Record<string, unknown>
+          ).__AGENT_CANVAS_DO_NOT_TRACK__ = true;
+        },
+      ],
+      ["disabled by the embedding host", () => configureTelemetry(false)],
+    ])("is unavailable when %s", (_reason, optOut) => {
+      optOut();
+
+      expect(isTelemetryAvailable()).toBe(false);
+    });
+
+    it("is unavailable in a build without a PostHog key", async () => {
+      vi.stubEnv("VITE_POSTHOG_API_KEY", "");
+      const { default: defaults } = await import("../../config/defaults.json");
+      vi.doMock("../../config/defaults.json", () => ({
+        default: {
+          ...defaults,
+          telemetry: { ...defaults.telemetry, posthogApiKey: "" },
+        },
+      }));
+      vi.resetModules();
+
+      const telemetry = await import("#/services/telemetry");
+
+      expect(telemetry.isTelemetryAvailable()).toBe(false);
     });
   });
 
