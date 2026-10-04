@@ -36,6 +36,7 @@ import {
   readRenderedSubagentTree,
   readStoredEvents,
   readStoredSubagentTree,
+  showSubagentCosts,
   startConversation,
   waitForTurnsToEnd,
   writeFanoutTranscript,
@@ -117,7 +118,7 @@ test.describe("ACP sub-agent sessions", () => {
 
   // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
   // @spec SUB-004 — The root's flow shows only the root session's work
-  // @spec SUB-006 — Each sub-agent shows its latest reported cost; costs are never added
+  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
   test("nests each sub-agent under the call that spawned it", async ({
     page,
     request,
@@ -155,6 +156,28 @@ test.describe("ACP sub-agent sessions", () => {
       await readStoredSubagentTree(request, conversationId),
     );
     expect(await rootCellIds(page)).toEqual(["cell-1"]);
+
+    // child-x has reported its cost, and its row shows it only once the App
+    // setting is on, which a full page load keeps.
+    await expect
+      .poll(async () =>
+        (await readStoredEvents(request, conversationId)).some(
+          (event) =>
+            event.kind === "ACPSubagentEvent" &&
+            event.acp_session_id === "child-x" &&
+            event.cost === 0.0004,
+        ),
+      )
+      .toBe(true);
+    await expect(
+      rowOf(page, "child-x").getByTestId("subagent-cost"),
+    ).toHaveCount(0);
+    await showSubagentCosts(page);
+    await page.goto(`/conversations/${conversationId}`);
+    await expect(summary).toHaveText("2 sub-agents · 2 running", {
+      timeout: 30_000,
+    });
+    await expandAllSubagents(page);
     await expect(
       rowOf(page, "child-x").getByTestId("subagent-cost").first(),
     ).toHaveText("$0.0004");

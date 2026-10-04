@@ -127,6 +127,7 @@ interface StoredEvent {
   parent_tool_call_id?: string | null;
   tool_call_id?: string;
   state?: string | null;
+  cost?: number | null;
   action?: { kind?: string };
 }
 
@@ -197,6 +198,14 @@ const bySessionId = (a: SubagentLink, b: SubagentLink) =>
 const COLLAPSED_TOGGLES =
   '[data-testid="subagent-block-toggle"][aria-expanded="false"], ' +
   '[data-testid="subagent-row-toggle"][aria-expanded="false"]';
+
+/** Turn on the App setting that shows sub-agent costs, as a user does. */
+export async function showSubagentCosts(page: Page): Promise<void> {
+  await page.goto("/settings/app", { waitUntil: "domcontentloaded" });
+  const toggle = page.getByTestId("show-subagent-costs-switch");
+  await page.locator("label", { has: toggle }).click();
+  await expect(toggle).toBeChecked();
+}
 
 /** Expand every collapsed sub-agent block and row, until none is left. */
 export async function expandAllSubagents(page: Page): Promise<void> {
