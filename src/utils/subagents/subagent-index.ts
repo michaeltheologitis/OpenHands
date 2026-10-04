@@ -372,14 +372,9 @@ function placeItem(
     );
     if (held !== -1) items.splice(held, 1);
   }
-  let low = 0;
-  let high = items.length;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (compareTimestamps(items[middle].at, item.at) <= 0) low = middle + 1;
-    else high = middle;
-  }
-  items.splice(low, 0, item);
+  let at = items.length;
+  while (at > 0 && compareTimestamps(items[at - 1].at, item.at) > 0) at -= 1;
+  items.splice(at, 0, item);
   return opened;
 }
 
