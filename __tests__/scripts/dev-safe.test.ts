@@ -642,10 +642,11 @@ describe("buildAgentServerCommand", () => {
     expect(cmd.source).toBe(`local (${sdk})`);
   });
 
-  it("local path takes precedence over git ref and version", () => {
+  it("local path takes precedence over git repository, ref and version", () => {
     const sdk = "/abs/path/to/software-agent-sdk";
     const cmd = buildAgentServerCommand({
       OH_AGENT_SERVER_LOCAL_PATH: sdk,
+      OH_AGENT_SERVER_GIT_REPO: "https://github.com/example/software-agent-sdk",
       OH_AGENT_SERVER_GIT_REF: "feature-branch",
       OH_AGENT_SERVER_VERSION: "1.18.0",
     });
@@ -691,12 +692,13 @@ describe("buildAgentServerCommand", () => {
     const forkRepo = "https://github.com/example/software-agent-sdk";
     const commitSha = "91430aa551ca3deb88989685656837929b3c246b";
 
-    it("installs all four packages from OH_AGENT_SERVER_GIT_REPO when it is set", () => {
+    it("installs all four packages from OH_AGENT_SERVER_GIT_REPO when it is set, reinstalling a branch", () => {
       const cmd = buildAgentServerCommand({
         OH_AGENT_SERVER_GIT_REPO: forkRepo,
         OH_AGENT_SERVER_GIT_REF: "feature-branch",
       });
 
+      expect(cmd.args[0]).toBe("--reinstall");
       expect(cmd.args.filter((arg) => arg.startsWith("git+"))).toEqual(
         [
           "openhands-agent-server",
