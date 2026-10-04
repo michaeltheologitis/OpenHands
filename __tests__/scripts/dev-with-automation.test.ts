@@ -1137,18 +1137,18 @@ describe("setup command", () => {
       });
 
       it.skipIf(process.platform === "win32")(
-        "a command still running at its timeout is stopped, with its background children, and rejects",
+        "a command still running at its 15-minute default timeout is stopped, with its background children, and rejects",
         async () => {
           const command = ["sh", "-c", "sleep 300 & echo $$ $!; wait"];
 
-          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const stopped = run(command).catch((e) => e);
           const [, shell, child] = await printed(/^(\d+) (\d+)$/);
           expect(hasExited(Number(child))).toBe(false);
-          vi.advanceTimersByTime(200);
+          vi.advanceTimersByTime(15 * 60_000);
           const error = await stopped;
 
           expect(error).toMatchObject({
-            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            message: `Setup command \`${command.join(" ")}\` was stopped after 15 minutes before the stack started. Its output is in the startup log.`,
             reason: "timeout",
           });
           expect(() => process.kill(Number(shell), 0)).toThrow(/ESRCH/);
