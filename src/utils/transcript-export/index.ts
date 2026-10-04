@@ -17,6 +17,7 @@ import {
   isStreamingDeltaEvent,
   isSwitchLLMObservationEvent,
   isClassifyAndSwitchLLMObservationEvent,
+  isSubagentToolCallEvent,
 } from "#/types/agent-server/type-guards";
 import { handleEventForUI } from "#/utils/handle-event-for-ui";
 import { markdownFence } from "#/utils/markdown-fence";
@@ -285,7 +286,8 @@ const buildTranscriptEntries = (
       (isSwitchLLMObservationEvent(event) && !event.observation.is_error) ||
       (isClassifyAndSwitchLLMObservationEvent(event) &&
         !event.observation.is_error) ||
-      shouldRenderEvent(event),
+      shouldRenderEvent(event) ||
+      isSubagentToolCallEvent(event),
   );
   const renderedItems = groupEvents(
     renderableEvents,

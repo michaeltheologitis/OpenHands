@@ -105,4 +105,13 @@ export interface ACPToolCallEvent extends BaseEvent {
    * when ``status`` is ``completed``.
    */
   is_error: boolean;
+
+  /** The ACP sub-agent session the call ran in; absent or null for the root. */
+  acp_session_id?: string | null;
+
+  /**
+   * The call's latest ACP `_meta`, recorded only for agents with
+   * `acp_subagents`. Opaque: Canvas never reads it.
+   */
+  meta?: Record<string, unknown> | null;
 }

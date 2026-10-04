@@ -17,6 +17,7 @@ import type {
 import type { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
 import { SecurityRisk } from "#/types/agent-server/core/base/common";
 import { eventsToHtml, eventsToMarkdown } from ".";
+import { call } from "../../../__tests__/helpers/subagent-events";
 
 vi.mock("#/i18n", () => ({
   default: {
@@ -186,6 +187,24 @@ describe("conversation transcript export", () => {
     expect(html).not.toContain("<details>");
     expect(html).not.toContain("passed");
     expect(html).not.toContain("<time");
+  });
+
+  it("exports tool calls made inside sub-agent sessions", () => {
+    const markdown = eventsToMarkdown(
+      [
+        call(1, "c1", { title: "Run spawn", status: "completed" }),
+        call(2, "c1", { session: "n2", title: "Run count" }),
+        call(3, "c1", {
+          session: "n2",
+          title: "Run count",
+          status: "completed",
+        }),
+      ],
+      defaultOptions,
+    );
+
+    expect(markdown).toContain("spawn");
+    expect(markdown).toContain("count");
   });
 
   it("exports agent errors and uses the UI's tool-output truncation", () => {

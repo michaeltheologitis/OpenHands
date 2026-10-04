@@ -5,6 +5,7 @@ import {
   isStreamingDeltaEvent,
 } from "#/types/agent-server/type-guards";
 import { StreamingDeltaEvent } from "#/types/agent-server/core/events/streaming-delta-event";
+import { toSessionRef } from "#/utils/subagents/subagent-keys";
 import type {
   DeltaFrame,
   ItemStartedFrame,
@@ -289,10 +290,13 @@ export const handleEventForUI = (
   }
 
   if (isACPToolCallEvent(event)) {
+    // ACP ids are unique only within a session: a call is its session and id.
+    const session = toSessionRef(event.acp_session_id);
     const existingIndex = newUiEvents.findIndex(
       (uiEvent) =>
         isACPToolCallEvent(uiEvent) &&
-        uiEvent.tool_call_id === event.tool_call_id,
+        uiEvent.tool_call_id === event.tool_call_id &&
+        toSessionRef(uiEvent.acp_session_id) === session,
     );
     if (existingIndex !== -1) {
       newUiEvents[existingIndex] = event;
