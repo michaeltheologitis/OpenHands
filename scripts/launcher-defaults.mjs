@@ -2,11 +2,11 @@
  * What a build's config/defaults.json may set for the npm and desktop
  * launchers, and the checks on those values.
  *
- * The keys are fallbacks for environment variables of the same meaning. Each
- * launcher's main() calls applyLauncherDefaults() once, first, which adds them
- * to process.env only where the variable is unset; every other function keeps
+ * The keys are fallbacks for environment variables of the same meaning.
+ * applyLauncherDefaults() adds them to the environment only where the variable
+ * is unset; called once at a launcher's entry, it leaves every other function
  * reading only the env it is given. So environment variables still win,
- * variable by variable, and the children the launchers start inherit the same
+ * variable by variable, and the children a launcher starts inherit the same
  * values.
  *
  *   sources.agentServerGitRepo -> OH_AGENT_SERVER_GIT_REPO
@@ -16,18 +16,15 @@
  *                                 files inside it (OH_SECRET_KEY_PATH,
  *                                 OH_SESSION_API_KEY_PATH)
  *
- * `setup` (a command the full-stack launcher runs as the user before the stack
- * starts and once the agent-server is ready) is read by readSetupConfig.
+ * `setup` names a command to run as the user before the stack starts and once
+ * the agent-server is ready; readSetupConfig validates it.
  *
  * Dependency-free (Node built-ins only): the packaged desktop app strips
  * node_modules, so a bare import here would fail only in the installed app.
  */
 
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
 
 const DEFAULTS_FILE = "config/defaults.json";
 
@@ -47,18 +44,6 @@ const AGENT_SERVER_SOURCE_VARIABLES = [
   "OH_AGENT_SERVER_GIT_REF",
   "OH_AGENT_SERVER_VERSION",
 ];
-
-/**
- * Read config/defaults.json next to this module's scripts/ directory (the same
- * layout in the repo, the npm package and the packaged app).
- * @returns {Record<string, any>}
- */
-export function loadSharedDefaults() {
-  const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
-  return JSON.parse(
-    readFileSync(path.join(scriptsDir, "..", DEFAULTS_FILE), "utf-8"),
-  );
-}
 
 /**
  * Expand a leading "~" or "~/" to `home`; return the result if it is absolute.
@@ -95,15 +80,10 @@ export function expandHomePath(value, name, home = homedir()) {
  * @throws {Error} `${name} must be an https or ssh git URL, got: ${value}`
  */
 export function validateGitRepoUrl(value, name) {
-  if (typeof value === "string" && !/\s/.test(value)) {
-    try {
-      const url = new URL(value);
-      if ((url.protocol === "https:" || url.protocol === "ssh:") && url.host) {
-        return value;
-      }
-    } catch {
-      // Not a URL at all; reported below.
-    }
+  const url =
+    typeof value === "string" && !/\s/.test(value) ? URL.parse(value) : null;
+  if ((url?.protocol === "https:" || url?.protocol === "ssh:") && url.host) {
+    return value;
   }
   throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
 }
@@ -167,16 +147,12 @@ export function launcherDefaultsEnv(env, defaults, home = homedir()) {
 }
 
 /**
- * Add launcherDefaultsEnv(env, defaults) to `env` in place. Each launcher's
- * main() calls this first.
- * @param {Record<string, string | undefined>} [env] defaults to process.env
- * @param {Record<string, any>} [defaults] defaults to loadSharedDefaults()
+ * Add launcherDefaultsEnv(env, defaults) to `env` in place.
+ * @param {Record<string, string | undefined>} env
+ * @param {Record<string, any>} defaults  the parsed config/defaults.json
  * @returns {string[]} the names of the variables it filled, sorted
  */
-export function applyLauncherDefaults(
-  env = process.env,
-  defaults = loadSharedDefaults(),
-) {
+export function applyLauncherDefaults(env, defaults) {
   const filled = launcherDefaultsEnv(env, defaults);
   Object.assign(env, filled);
   return Object.keys(filled).sort();

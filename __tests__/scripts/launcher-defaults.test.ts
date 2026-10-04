@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyLauncherDefaults,
   launcherDefaultsEnv,
-  loadSharedDefaults,
   readSetupConfig,
 } from "../../scripts/launcher-defaults.mjs";
 
@@ -305,16 +304,5 @@ describe("readSetupConfig", () => {
     ).toThrow(
       `setup.phases in config/defaults.json may list only "before-start" and "after-ready", got: ${shown}`,
     );
-  });
-});
-
-describe("loadSharedDefaults", () => {
-  it("loads config/defaults.json from beside the scripts directory", () => {
-    const defaults = loadSharedDefaults();
-
-    expect(defaults.ports).toMatchObject({
-      agentServer: expect.any(Number),
-      automation: expect.any(Number),
-    });
   });
 });

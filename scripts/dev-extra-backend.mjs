@@ -10,6 +10,7 @@ import {
   buildAgentServerEnv,
   buildSafeDevConfig,
   formatMissingUvxGuidance,
+  SHARED_DEFAULTS,
   validateLocalAgentServerPath,
 } from "./dev-safe.mjs";
 import { applyLauncherDefaults } from "./launcher-defaults.mjs";
@@ -123,7 +124,7 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function main() {
-  applyLauncherDefaults();
+  applyLauncherDefaults(process.env, SHARED_DEFAULTS);
   const config = buildExtraBackendConfig();
 
   if (process.env.OH_AGENT_SERVER_LOCAL_PATH) {
