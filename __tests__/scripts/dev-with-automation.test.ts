@@ -59,6 +59,7 @@ import {
   buildAgentServerEnv,
   buildSafeDevConfig,
   findFreePorts,
+  isPortBusy,
   resetPersistedSessionApiKeyCache,
 } from "../../scripts/dev-safe.mjs";
 import { createRouter } from "../../scripts/proxy-utils.mjs";
@@ -1360,6 +1361,7 @@ describe("dev-with-automation CLI", () => {
     expect(output).toContain("OH_AGENT_SERVER_LOCAL_PATH");
     expect(output).toContain("OH_AGENT_SERVER_GIT_REPO");
     expect(output).toContain("OPENHANDS_AUTOMATION_API_KEY");
+    expect(output).toContain("SETUP:");
     expect(output).toContain("SECRETS:");
   });
 
@@ -1524,6 +1526,37 @@ http
   .listen(port, "127.0.0.1");
 `;
 
+// The setup command: records its phase, working directory and environment,
+// and fails in the phase SETUP_STUB_FAIL_PHASE names.
+const SETUP_STUB_SOURCE = `
+import { appendFileSync } from "node:fs";
+
+const phase = process.env.OH_CANVAS_SETUP_PHASE;
+const env = {};
+for (const name of [
+  "OH_CANVAS_SETUP_PHASE",
+  "OH_CANVAS_SAFE_STATE_DIR",
+  "OH_PERSISTENCE_DIR",
+  "AGENT_SERVER_URL",
+  "SESSION_API_KEY",
+]) {
+  if (process.env[name] !== undefined) env[name] = process.env[name];
+}
+appendFileSync(
+  process.env.SETUP_STUB_LOG,
+  JSON.stringify({ phase, cwd: process.cwd(), env, time: Date.now() }) + "\\n",
+);
+console.log("example setup: " + phase);
+process.exit(phase === process.env.SETUP_STUB_FAIL_PHASE ? 2 : 0);
+`;
+
+type SetupRecord = {
+  phase: string;
+  cwd: string;
+  env: Record<string, string>;
+  time: number;
+};
+
 type UvxRecord = {
   service: "agent-server" | "automation";
   pid: number;
@@ -1609,6 +1642,7 @@ function createPackagedApp(
   );
   const home = path.join(root, "home");
   mkdirSync(home);
+  writeFileSync(path.join(root, "setup-stub.mjs"), SETUP_STUB_SOURCE);
 
   return {
     root,
@@ -1616,7 +1650,15 @@ function createPackagedApp(
     home,
     uvxLog: path.join(root, "uvx.jsonl"),
     uvxRecords: () => readJsonLines<UvxRecord>(path.join(root, "uvx.jsonl")),
+    setupLog: path.join(root, "setup.jsonl"),
+    setupRecords: () =>
+      readJsonLines<SetupRecord>(path.join(root, "setup.jsonl")),
   };
+}
+
+/** The setup command a packaged app's defaults.json names for the stub. */
+function setupStubCommand(root: string) {
+  return [process.execPath, path.join(root, "setup-stub.mjs")];
 }
 
 type PackagedApp = ReturnType<typeof createPackagedApp>;
@@ -1650,6 +1692,7 @@ async function launchPackagedApp(
         OH_CANVAS_SAFE_BACKEND_PORT: String(ports.agentServer),
         OH_CANVAS_SAFE_AUTOMATION_PORT: String(ports.automation),
         UVX_STUB_LOG: app.uvxLog,
+        SETUP_STUB_LOG: app.setupLog,
         ...env,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -1707,6 +1750,15 @@ describe.skipIf(process.platform === "win32")(
     const forkSource = {
       sources: { agentServerGitRepo: forkRepo, agentServerGitRef: commitSha },
     };
+
+    const withSetup = (root: string) => ({
+      setup: {
+        command: setupStubCommand(root),
+        phases: ["before-start", "after-ready"],
+      },
+    });
+    const setupFailure = (root: string, clause: string) =>
+      `Setup command \`${setupStubCommand(root).join(" ")}\` failed (exit 2) ${clause} Its output is in the startup log.`;
 
     const started = (app: PackagedApp, service: UvxRecord["service"]) =>
       app
@@ -1821,6 +1873,176 @@ describe.skipIf(process.platform === "win32")(
       expect(lastOutput).toContain(
         "error: Failed to fetch: network unreachable",
       );
+    }, 30_000);
+
+    it("runs before-start before the agent-server and after-ready once it answers", async () => {
+      const app = createPackagedApp(withSetup);
+      const launch = await launchPackagedApp(app);
+
+      const automation = await eventually(launch, () =>
+        started(app, "automation"),
+      );
+
+      const [beforeStart, afterReady, ...rest] = app.setupRecords();
+      expect(rest).toEqual([]);
+      expect(beforeStart.phase).toBe("before-start");
+      expect(afterReady.phase).toBe("after-ready");
+
+      const agentServer = started(app, "agent-server")!;
+      const firstServerInfo = app
+        .uvxRecords()
+        .find(
+          (record) =>
+            record.service === "agent-server" && record.url === "/server_info",
+        )!;
+      expect(beforeStart.time).toBeLessThan(agentServer.time);
+      expect(afterReady.time).toBeGreaterThan(firstServerInfo.time);
+      expect(afterReady.time).toBeLessThan(automation.time);
+
+      const stateDir = realpathSync(
+        path.join(app.home, ".openhands", "agent-canvas"),
+      );
+      for (const record of [beforeStart, afterReady]) {
+        expect(record.cwd).toBe(stateDir);
+        expect(record.env).toMatchObject({
+          OH_CANVAS_SAFE_STATE_DIR: stateDir,
+          OH_PERSISTENCE_DIR: path.dirname(stateDir),
+        });
+      }
+      expect(beforeStart.env).not.toHaveProperty("AGENT_SERVER_URL");
+      expect(beforeStart.env).not.toHaveProperty("SESSION_API_KEY");
+      expect(afterReady.env).toMatchObject({
+        AGENT_SERVER_URL: `http://127.0.0.1:${launch.ports.agentServer}`,
+        SESSION_API_KEY: agentServer.env?.OH_SESSION_API_KEYS_0,
+      });
+      expect(launch.output()).toContain("example setup: before-start");
+      expect(launch.output()).toContain("example setup: after-ready");
+    }, 30_000);
+
+    it("a failing before-start setup stops the launch before any service starts", async () => {
+      const app = createPackagedApp(withSetup);
+      const launch = await launchPackagedApp(app, {
+        SETUP_STUB_FAIL_PHASE: "before-start",
+      });
+
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        setupFailure(app.root, "before the stack started."),
+      );
+      expect(launch.output()).toContain("example setup: before-start");
+      expect(app.uvxRecords()).toEqual([]);
+    }, 30_000);
+
+    it("a failing after-ready setup stops the agent-server and fails the launch", async () => {
+      const app = createPackagedApp(withSetup);
+      const launch = await launchPackagedApp(app, {
+        SETUP_STUB_FAIL_PHASE: "after-ready",
+      });
+
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        setupFailure(
+          app.root,
+          "after the agent-server started; the stack was stopped.",
+        ),
+      );
+      expect(app.setupRecords().map((record) => record.phase)).toEqual([
+        "before-start",
+        "after-ready",
+      ]);
+      expect(await isPortBusy(launch.ports.agentServer)).toBe(false);
+      expect(
+        app.uvxRecords().some((record) => record.service === "automation"),
+      ).toBe(false);
+    }, 30_000);
+
+    /** The pids a setup command prints on one line, once it has. */
+    const printedPids = (launch: PackagedLaunch, phase: string) =>
+      eventually(launch, () =>
+        launch
+          .output()
+          .match(new RegExp(`\\[setup ${phase}\\]\\S* ([\\d ]+)$`, "m"))?.[1]
+          .split(" ")
+          .map(Number),
+      );
+
+    it.each([
+      ["before-start", "obeys", ""],
+      ["after-ready", "ignores", 'trap "" TERM; '],
+    ])(
+      "quitting while %s waits on a background child that %s SIGTERM stops the child and ends the launch there",
+      async (phase, _, trap) => {
+        const command = ["sh", "-c", `${trap}sleep 300 & echo $$ $!`];
+        const app = createPackagedApp({ setup: { command, phases: [phase] } });
+        const launch = await launchPackagedApp(app);
+        const [shell, child] = await printedPids(launch, phase);
+        killAtEnd(child);
+        await eventually(launch, () => hasExited(shell));
+        expect(hasExited(child)).toBe(false);
+
+        launch.child.kill("SIGTERM");
+
+        expect(await launch.exited).toBe(0);
+        await expect
+          .poll(() => hasExited(child), { timeout: 5_000 })
+          .toBe(true);
+        expect(launch.output()).not.toContain("Done in");
+      },
+      30_000,
+    );
+
+    it("quitting after a phase has finished signals nothing to its process group", async () => {
+      const command = ["sh", "-c", "sleep 300 > /dev/null 2>&1 & echo $!"];
+      const app = createPackagedApp({
+        setup: { command, phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+      await eventually(launch, () => started(app, "agent-server"));
+      const [child] = await printedPids(launch, "before-start");
+      killAtEnd(child);
+
+      launch.child.kill("SIGTERM");
+
+      expect(await launch.exited).toBe(0);
+      expect(hasExited(child)).toBe(false);
+    }, 30_000);
+
+    it("quitting while a phase waits on a background child that left its process group still exits within 6 s", async () => {
+      const command = [
+        process.execPath,
+        "-e",
+        'const child = require("node:child_process").spawn("sleep", ["300"], { detached: true, stdio: "inherit" }); child.unref(); console.log(process.pid, child.pid);',
+      ];
+      const app = createPackagedApp({
+        setup: { command, phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+      const [leader, child] = await printedPids(launch, "before-start");
+      killAtEnd(child);
+      await eventually(launch, () => hasExited(leader));
+
+      launch.child.kill("SIGTERM");
+
+      expect(
+        await Promise.race([
+          launch.exited,
+          delay(6_000).then(() => "still running"),
+        ]),
+      ).toBe(0);
+    }, 30_000);
+
+    it("a malformed setup in defaults.json fails the launch before anything runs", async () => {
+      const app = createPackagedApp({
+        setup: { command: "example-app setup", phases: ["before-start"] },
+      });
+      const launch = await launchPackagedApp(app);
+
+      expect(await launch.exited).toBe(1);
+      expect(launch.output()).toContain(
+        'setup.command in config/defaults.json must be a non-empty array of non-empty strings, got: "example-app setup"',
+      );
+      expect(app.uvxRecords()).toEqual([]);
+      expect(app.setupRecords()).toEqual([]);
     }, 30_000);
   },
 );

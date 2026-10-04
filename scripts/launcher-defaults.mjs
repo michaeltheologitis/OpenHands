@@ -16,6 +16,9 @@
  *                                 files inside it (OH_SECRET_KEY_PATH,
  *                                 OH_SESSION_API_KEY_PATH)
  *
+ * `setup` names a command to run as the user before the stack starts and once
+ * the agent-server is ready; readSetupConfig validates it.
+ *
  * Dependency-free (Node built-ins only): the packaged desktop app strips
  * node_modules, so a bare import here would fail only in the installed app.
  */
@@ -139,4 +142,50 @@ export function validateGitRepoUrl(value, name) {
     return value;
   }
   throw new Error(`${name} must be an https or ssh git URL, got: ${value}`);
+}
+
+/** The phases a setup command can run in, in launch order. */
+const SETUP_PHASES = Object.freeze(["before-start", "after-ready"]);
+
+/**
+ * @typedef {object} SetupConfig
+ * @property {string[]} command  argv; command[0] is resolved on PATH; run without a shell.
+ * @property {("before-start" | "after-ready")[]} phases  non-empty, no duplicates, in SETUP_PHASES order.
+ */
+
+/**
+ * The setup command of `defaults`, validated, or null when setup.command is
+ * null or absent. setup.phases defaults to both phases.
+ * @param {Record<string, any>} defaults
+ * @returns {SetupConfig | null}
+ * @throws {Error} naming setup.command or setup.phases when either is malformed
+ */
+export function readSetupConfig(defaults) {
+  const command = defaults.setup?.command ?? null;
+  const phases = defaults.setup?.phases ?? SETUP_PHASES;
+
+  if (
+    !Array.isArray(phases) ||
+    phases.length === 0 ||
+    new Set(phases).size !== phases.length ||
+    !phases.every((phase) => SETUP_PHASES.includes(phase))
+  ) {
+    throw new Error(
+      `setup.phases in ${DEFAULTS_FILE} may list only "before-start" and "after-ready", got: ${JSON.stringify(phases)}`,
+    );
+  }
+  if (command === null) return null;
+  if (
+    !Array.isArray(command) ||
+    command.length === 0 ||
+    !command.every((arg) => typeof arg === "string" && arg !== "")
+  ) {
+    throw new Error(
+      `setup.command in ${DEFAULTS_FILE} must be a non-empty array of non-empty strings, got: ${JSON.stringify(command)}`,
+    );
+  }
+  return {
+    command: [...command],
+    phases: SETUP_PHASES.filter((phase) => phases.includes(phase)),
+  };
 }

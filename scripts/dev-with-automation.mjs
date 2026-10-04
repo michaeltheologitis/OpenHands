@@ -73,7 +73,10 @@ import {
   resolveWindowsCommand,
   signalProcessTree,
 } from "./dev-process-utils.mjs";
-import { applyLauncherDefaults } from "./launcher-defaults.mjs";
+import {
+  applyLauncherDefaults,
+  readSetupConfig,
+} from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 import {
   applySessionKeyPolicy,
@@ -279,6 +282,13 @@ ENVIRONMENT VARIABLES:
                               (default: ${DEFAULT_AGENT_SERVER_GIT_REPO})
   OH_AGENT_SERVER_VERSION     Specific PyPI version for agent-server
   OH_SECRET_KEY               Secret key for sessions
+
+SETUP:
+  A build's config/defaults.json "setup" may name a command (an argv array)
+  that runs as you on every launch that starts the agent-server: before any
+  service starts (before-start) and once the agent-server answers (after-ready,
+  with AGENT_SERVER_URL and SESSION_API_KEY set). OH_CANVAS_SETUP_PHASE names
+  the phase. A non-zero exit stops the launch.
 
 SECRETS:
   The session API key is automatically seeded into agent-server secrets
@@ -1268,6 +1278,29 @@ export class SetupCommandError extends Error {
   }
 }
 
+/**
+ * The variables the launcher adds to the setup command's environment. Pure.
+ * @param {{ stateDir: string, agentServerPort: number, sessionApiKey: string }} config
+ * @param {"before-start" | "after-ready"} phase
+ * @returns {Record<string, string>}
+ */
+function buildSetupEnv(config, phase) {
+  const stateDir = resolve(config.stateDir);
+  return {
+    OH_CANVAS_SETUP_PHASE: phase,
+    OH_CANVAS_SAFE_STATE_DIR: stateDir,
+    // What the agent-server is given: the state directory's parent holds its
+    // settings, secrets, profiles and installed Apps.
+    OH_PERSISTENCE_DIR: dirname(stateDir),
+    ...(phase === "after-ready"
+      ? {
+          AGENT_SERVER_URL: getAgentServerBaseUrl(config),
+          SESSION_API_KEY: config.sessionApiKey,
+        }
+      : {}),
+  };
+}
+
 function formatDuration(ms) {
   const seconds = Math.round(ms / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -1799,6 +1832,10 @@ async function main(options = {}) {
     // download / install progress to the user. `level` is one of
     // "stdout" | "stderr" | "info" | "warn" | "error".
     onServiceLog,
+    // The setup command ({ command, phases }, validated like
+    // config/defaults.json `setup`). Undefined reads config/defaults.json;
+    // null runs no setup.
+    setup: setupOption,
   } = options;
 
   // Install the listener early so log lines emitted before the first
@@ -1821,6 +1858,11 @@ async function main(options = {}) {
       c.dim,
     );
   }
+  // Read now, so a malformed setup fails the launch before anything runs.
+  const setup =
+    setupOption === undefined
+      ? readSetupConfig(SHARED_DEFAULTS)
+      : setupOption && readSetupConfig({ setup: setupOption });
 
   // Allow options to override CLI args for public mode
   if (isPublicOverride != null) {
@@ -1910,6 +1952,23 @@ async function main(options = {}) {
     extraPrereqs(config);
   }
 
+  // The setup command runs only on launches that start the agent-server.
+  const setupPhases = config.launchAgentServer ? (setup?.phases ?? []) : [];
+  const runSetupPhase = (phase) => {
+    const env = buildSetupEnv(config, phase);
+    return runSetupCommand({
+      command: setup.command,
+      phase,
+      cwd: env.OH_CANVAS_SAFE_STATE_DIR,
+      env,
+    });
+  };
+
+  // Before any service starts; a failure throws with nothing to stop.
+  if (setupPhases.includes("before-start")) {
+    await runSetupPhase("before-start");
+  }
+
   if (
     config.launchFrontend &&
     useStaticMode &&
@@ -1964,6 +2023,25 @@ async function main(options = {}) {
     logService(
       "secrets",
       "Skipping secret seeding - agent-server not ready",
+      c.yellow,
+    );
+  }
+
+  // The setup command's after-ready phase, before automation, the frontend
+  // and the ingress start, so what it registers through the agent-server
+  // exists before the first screen asks for it. Only the agent-server is
+  // running here, so a failure stops it before failing the launch.
+  if (setupPhases.includes("after-ready") && agentServerReady) {
+    try {
+      await runSetupPhase("after-ready");
+    } catch (error) {
+      await stopServices();
+      throw error;
+    }
+  } else if (setupPhases.includes("after-ready")) {
+    logServiceEvent(
+      "setup after-ready",
+      "Skipping setup after-ready: agent-server not ready",
       c.yellow,
     );
   }

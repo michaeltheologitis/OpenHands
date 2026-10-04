@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyLauncherDefaults,
   launcherDefaultsEnv,
+  readSetupConfig,
 } from "../../scripts/launcher-defaults.mjs";
 
 const home = "/home/canvas-user";
@@ -196,5 +197,64 @@ describe("applyLauncherDefaults", () => {
       OH_AGENT_SERVER_GIT_REF: commitSha,
       OH_AGENT_SERVER_GIT_REPO: forkRepo,
     });
+  });
+});
+
+describe("readSetupConfig", () => {
+  it("reads an argv setup command and runs it in both phases by default", () => {
+    expect(
+      readSetupConfig({ setup: { command: ["example-app", "setup"] } }),
+    ).toEqual({
+      command: ["example-app", "setup"],
+      phases: ["before-start", "after-ready"],
+    });
+    expect(
+      readSetupConfig({
+        setup: {
+          command: ["example-app", "setup"],
+          phases: ["after-ready", "before-start"],
+        },
+      }),
+    ).toEqual({
+      command: ["example-app", "setup"],
+      phases: ["before-start", "after-ready"],
+    });
+    expect(
+      readSetupConfig({
+        setup: { command: ["example-app", "setup"], phases: ["after-ready"] },
+      }),
+    ).toEqual({ command: ["example-app", "setup"], phases: ["after-ready"] });
+  });
+
+  it("a null setup command means no setup", () => {
+    // Upstream's shape: the block is present, its command null.
+    expect(
+      readSetupConfig({
+        setup: { command: null, phases: ["before-start", "after-ready"] },
+      }),
+    ).toBeNull();
+    expect(readSetupConfig({})).toBeNull();
+  });
+
+  it.each([
+    ["a string", "example-app setup", '"example-app setup"'],
+    ["an empty array", [], "[]"],
+    ["an empty argument", ["example-app", ""], '["example-app",""]'],
+  ])("rejects a setup command given as %s", (_kind, command, shown) => {
+    expect(() => readSetupConfig({ setup: { command } })).toThrow(
+      `setup.command in config/defaults.json must be a non-empty array of non-empty strings, got: ${shown}`,
+    );
+  });
+
+  it.each([
+    [["first-launch"], '["first-launch"]'],
+    [["before-start", "before-start"], '["before-start","before-start"]'],
+    ["before-start", '"before-start"'],
+  ])("rejects an unknown or repeated phase (%j)", (phases, shown) => {
+    expect(() =>
+      readSetupConfig({ setup: { command: ["example-app", "setup"], phases } }),
+    ).toThrow(
+      `setup.phases in config/defaults.json may list only "before-start" and "after-ready", got: ${shown}`,
+    );
   });
 });
