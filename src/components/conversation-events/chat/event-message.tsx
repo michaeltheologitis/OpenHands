@@ -32,6 +32,7 @@ import { UserAssistantEventMessage } from "./event-message-components/user-assis
 import { FinishEventMessage } from "./event-message-components/finish-event-message";
 import { GenericEventMessageWrapper } from "./event-message-components/generic-event-message-wrapper";
 import { ThoughtEventMessage } from "./event-message-components/thought-event-message";
+import { AcpToolCallCell } from "./subagents/acp-tool-call-cell";
 import { CollapsibleThinking } from "./event-message-components/collapsible-thinking";
 import { HookExecutionEventMessage } from "./event-message-components/hook-execution-event-message";
 import { createSkillReadyEvent } from "./event-content-helpers/create-skill-ready-event";
@@ -230,13 +231,12 @@ function EventMessageComponent({
     return <HookExecutionEventMessage event={event} />;
   }
 
-  // ACP sub-agent tool call events (Claude Code, Codex, Gemini CLI, …)
-  // render through the same generic wrapper used for observation events so
-  // the card shape, success indicator and markdown rendering all match.
+  // ACP tool call events (Claude Code, Codex, Gemini CLI, …) render through
+  // the same generic wrapper used for observation events so the card shape,
+  // success indicator and markdown rendering all match; the sub-agents a call
+  // spawned render under its card.
   if (isACPToolCallEvent(event)) {
-    return (
-      <GenericEventMessageWrapper event={event} isLastMessage={isLastMessage} />
-    );
+    return <AcpToolCallCell event={event} depth={0} />;
   }
 
   if (isStreamingDeltaEvent(event)) {

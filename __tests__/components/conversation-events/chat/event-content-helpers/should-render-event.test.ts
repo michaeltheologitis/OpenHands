@@ -17,6 +17,7 @@ import {
 } from "#/types/agent-server/core";
 import { SwitchLLMAction } from "#/types/agent-server/core/base/action";
 import { SwitchLLMObservation } from "#/types/agent-server/core/base/observation";
+import { child, message, text } from "../../../../helpers/subagent-events";
 
 const makeACPEvent = (
   overrides: Partial<ACPToolCallEvent> = {},
@@ -64,6 +65,24 @@ describe("shouldRenderEvent - PlanningFileEditorAction", () => {
 });
 
 describe("shouldRenderEvent - ACPToolCallEvent", () => {
+  // @spec SUB-004 — The root's flow shows only the root session's work
+  it("hides tool calls made inside a sub-agent session", () => {
+    expect(shouldRenderEvent(makeACPEvent({ acp_session_id: "n2" }))).toBe(
+      false,
+    );
+    expect(shouldRenderEvent(makeACPEvent({ acp_session_id: null }))).toBe(
+      true,
+    );
+  });
+
+  it("leaves sub-agent snapshots, messages and text to the sub-agent tree", () => {
+    expect(shouldRenderEvent(child(1, "n2"))).toBe(false);
+    expect(
+      shouldRenderEvent(message(2, "m1", { from: "s", to: "n2", text: "t" })),
+    ).toBe(false);
+    expect(shouldRenderEvent(text(3, "n2", "thinking"))).toBe(false);
+  });
+
   it("renders the early in_progress 'started' card", () => {
     // The SDK now persists exactly one ``started`` (in_progress) event and
     // one terminal event per ``tool_call_id`` — the action->observation pair.
