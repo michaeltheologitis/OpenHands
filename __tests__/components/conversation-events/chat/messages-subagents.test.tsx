@@ -125,6 +125,28 @@ describe("Messages with ACP sub-agent sessions", () => {
     expect(isBefore(cards()[0], unplaced)).toBe(true);
   });
 
+  // @spec SUB-003 — A sub-agent whose parent session is not in the conversation is shown apart, never in the root's flow
+  it("nests a child spawned inside an unplaced child under it, in one block", async () => {
+    const user = userEvent.setup();
+    seed(
+      child(1, "child-o", { parent: "ghost" }),
+      call(2, "co1", { session: "child-o" }),
+      child(3, "child-p", { parent: "child-o", cell: "co1" }),
+    );
+    renderWithProviders(<Chat />);
+
+    const missingParents = screen
+      .getAllByTestId("subagent-unplaced")
+      .map((block) => block.getAttribute("data-missing-parent-session-id"));
+    expect(missingParents).toEqual(["ghost"]);
+
+    const childO = rowOf("child-o") as HTMLElement;
+    await user.click(within(childO).getByTestId("subagent-row-toggle"));
+    await user.click(within(childO).getByTestId("subagent-block-toggle"));
+
+    expect(childO).toContainElement(rowOf("child-p") as HTMLElement);
+  });
+
   // @spec SUB-009 — Agents without sub-agent sessions render as before
   it("renders agents without sub-agent sessions as before", () => {
     seed(call(1, "c1"), call(2, "c1", { status: "completed" }));

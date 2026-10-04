@@ -594,6 +594,22 @@ describe("foldSubagentEvents", () => {
       ["n3", "parent-session"],
     ]);
   });
+
+  // @spec SUB-003 — A sub-agent whose parent session is not in the conversation is shown apart, never in the root's flow
+  it("sets apart only the child whose own parent is missing, not the children it spawns", () => {
+    const index = fold(
+      child(1, "child-o", { parent: "ghost" }),
+      call(2, "co1", { session: "child-o" }),
+      child(3, "child-p", { parent: "child-o", cell: "co1" }),
+    );
+
+    expect(index.placement.byCell.get(toolCallKey("child-o", "co1"))).toEqual([
+      "child-p",
+    ]);
+    expect(unplacedGroups(index.placement.pending)).toEqual([
+      { missingParentId: "ghost", sessionIds: ["child-o"] },
+    ]);
+  });
 });
 
 describe("buildSubagentIndex", () => {
