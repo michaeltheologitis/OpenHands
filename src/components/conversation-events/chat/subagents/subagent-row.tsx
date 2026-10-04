@@ -11,6 +11,7 @@ import {
   SUBAGENT_TOOL_CALLS_I18N_KEY,
 } from "./subagent-labels";
 import { useSubagents } from "./subagent-source";
+import { StopSubagentButton } from "./stop-subagent-button";
 import { SubagentTranscript } from "./subagent-transcript";
 
 export interface SubagentRowProps {
@@ -20,7 +21,7 @@ export interface SubagentRowProps {
 
 const firstLineOf = (text: string) => text.trim().split("\n", 1)[0];
 
-/** One child: status, title, answer, tool calls; its transcript. */
+/** One child: status, title, answer, tool calls, Stop; its transcript. */
 export const SubagentRow = React.memo(function SubagentRow({
   sessionId,
   depth,
@@ -109,6 +110,7 @@ export const SubagentRow = React.memo(function SubagentRow({
             {t(SUBAGENT_TOOL_CALLS_I18N_KEY, { count: stats?.toolCalls ?? 0 })}
           </span>
         </button>
+        <StopSubagentButton sessionId={sessionId} title={title} />
       </div>
       {expanded && <SubagentTranscript sessionId={sessionId} depth={depth} />}
     </li>

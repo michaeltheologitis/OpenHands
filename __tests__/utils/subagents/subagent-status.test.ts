@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ACPSubagentEvent } from "#/types/agent-server/core/events/acp-subagent-event";
 import type { SubagentRecord } from "#/utils/subagents/subagent-index";
 import {
+  canStopSubagent,
   getSubagentStatus,
+  isStopWithheld,
   summarizeSubagents,
 } from "#/utils/subagents/subagent-status";
 import { child, reconnect } from "../../helpers/subagent-events";
@@ -93,6 +95,31 @@ describe("getSubagentStatus", () => {
       lastKnown: null,
     });
   });
+});
+
+// @spec SUB-007 — Stop is offered only for a running sub-agent that granted cancel on the live connection
+describe("Stop", () => {
+  it.each([
+    // state, cancellable, source, can stop, withheld
+    ["running", true, "agent", true, false],
+    ["requires_action", true, "agent", true, false],
+    ["running", false, "agent", false, true],
+    ["requires_action", false, "agent", false, true],
+    // An agent may keep a finished child's grant; the route answers 409.
+    ["idle", true, "agent", false, false],
+    ["idle", false, "agent", false, false],
+    ["unknown", true, "agent", false, false],
+    [null, true, "agent", false, false],
+    [null, false, "environment", false, false],
+  ] as const)(
+    "%s, cancellable %s, from the %s: Stop %s, withheld %s",
+    (state, cancellable, source, canStop, withheld) => {
+      const record = recordOf(child(1, "n2", { state, cancellable, source }));
+
+      expect(canStopSubagent(record)).toBe(canStop);
+      expect(isStopWithheld(record)).toBe(withheld);
+    },
+  );
 });
 
 describe("summarizeSubagents", () => {
