@@ -73,6 +73,7 @@ import {
   resolveWindowsCommand,
   signalProcessTree,
 } from "./dev-process-utils.mjs";
+import { applyLauncherDefaults } from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 import {
   applySessionKeyPolicy,
@@ -661,6 +662,12 @@ function emitServiceLog(name, line, level) {
   } catch {
     // Never let a listener bug crash the dev stack.
   }
+}
+
+/** A launcher line for both the terminal and the service-log listener. */
+function logServiceEvent(name, message, color) {
+  logService(name, message, color);
+  emitServiceLog(name, message, "info");
 }
 
 function registerShutdownHook(hook) {
@@ -1496,6 +1503,21 @@ async function main(options = {}) {
   setServiceLogListener(onServiceLog);
 
   const args = parseArgs();
+
+  // A build's config/defaults.json may name the agent-server's source and the
+  // state directory; they fill only the variables the environment leaves
+  // unset, so everything below reads one set of values from process.env.
+  const filledFromDefaults = applyLauncherDefaults(
+    process.env,
+    SHARED_DEFAULTS,
+  );
+  if (filledFromDefaults.length > 0) {
+    logServiceEvent(
+      "defaults",
+      `From config/defaults.json: ${filledFromDefaults.join(", ")}`,
+      c.dim,
+    );
+  }
 
   // Allow options to override CLI args for public mode
   if (isPublicOverride != null) {
