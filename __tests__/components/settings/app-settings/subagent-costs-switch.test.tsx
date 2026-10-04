@@ -73,4 +73,22 @@ describe("SubagentCostsSwitch", () => {
     expect(toggle()).toBeChecked();
     expect(cost()).toHaveTextContent("$0.0004");
   });
+
+  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
+  it("follows the setting when another tab changes it", async () => {
+    await renderSwitchBesideSubagent();
+
+    act(() => {
+      window.localStorage.setItem(SHOW_SUBAGENT_COSTS_STORAGE_KEY, "true");
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: SHOW_SUBAGENT_COSTS_STORAGE_KEY,
+          newValue: "true",
+        }),
+      );
+    });
+
+    expect(toggle()).toBeChecked();
+    expect(cost()).toHaveTextContent("$0.0004");
+  });
 });
