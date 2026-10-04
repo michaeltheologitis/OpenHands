@@ -86,6 +86,12 @@ describe("launcherDefaultsEnv", () => {
       { OH_CANVAS_SAFE_STATE_DIR: homeStateDir, ...keyFilesIn(homeStateDir) },
     ],
     [
+      "fills the state directory from defaults, expanding a bare ~ to the home directory",
+      {},
+      withStateDir("~"),
+      { OH_CANVAS_SAFE_STATE_DIR: home, ...keyFilesIn(home) },
+    ],
+    [
       "moves both key files into a state directory named by defaults",
       {},
       withStateDir(stateDir),
@@ -152,15 +158,18 @@ describe("launcherDefaultsEnv", () => {
     },
   );
 
-  it("rejects an empty ref", () => {
+  it.each([
+    ["", '""'],
+    ["   ", '"   "'],
+  ])("rejects an empty or whitespace-only ref (%j)", (ref, shown) => {
     expect(() =>
       launcherDefaultsEnv(
         environmentWins,
-        defaultsWith({ sources: { agentServerGitRef: "" } }),
+        defaultsWith({ sources: { agentServerGitRef: ref } }),
         home,
       ),
     ).toThrow(
-      'sources.agentServerGitRef in config/defaults.json must be a non-empty string, got: ""',
+      `sources.agentServerGitRef in config/defaults.json must be a non-empty string, got: ${shown}`,
     );
   });
 });
