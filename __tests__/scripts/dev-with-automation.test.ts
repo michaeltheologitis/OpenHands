@@ -1218,9 +1218,10 @@ describe("dev-with-automation CLI", () => {
 // tools/ and a config/defaults.json the test writes. Outside the repository a
 // bare npm import in a launcher script fails here as it does in the installed
 // app. A stub `uvx` first on PATH records its argv and answers 200 on its
-// --port, standing in for the agent-server and the automation backend. The
-// ingress cannot resolve httpxy here and logs that; nothing below depends on
-// it.
+// --port, standing in for the agent-server and the automation backend; with
+// UVX_STUB_AGENT_SERVER_FAILS set, the agent-server fails at once as a uvx
+// without network does. The ingress cannot resolve httpxy here and logs that;
+// nothing below depends on it.
 
 const UVX_STUB_SOURCE = `
 import { appendFileSync } from "node:fs";
@@ -1241,6 +1242,11 @@ record({
     OH_SESSION_API_KEYS_0: process.env.OH_SESSION_API_KEYS_0,
   },
 });
+if (service === "agent-server" && process.env.UVX_STUB_AGENT_SERVER_FAILS) {
+  console.log("Resolving openhands-agent-server");
+  console.error("error: Failed to fetch: network unreachable");
+  process.exit(3);
+}
 const port = Number(argv[argv.indexOf("--port") + 1]);
 http
   .createServer((req, res) => {
@@ -1503,6 +1509,34 @@ describe.skipIf(process.platform === "win32")(
         OH_SESSION_API_KEYS_0: sessionKey,
       });
       expect(existsSync(path.join(app.home, ".openhands"))).toBe(false);
+    }, 30_000);
+
+    it("fails at once, with the exit code and last output, when the agent-server exits before answering", async () => {
+      // A uvx that fails at once (no network, a bad ref) must not leave the
+      // launcher waiting out its readiness timeout: 60 s here, 10 minutes in
+      // the desktop app.
+      const app = createPackagedApp({});
+      const launch = await launchPackagedApp(app, {
+        UVX_STUB_AGENT_SERVER_FAILS: "1",
+      });
+
+      expect(
+        await Promise.race([
+          launch.exited,
+          delay(20_000).then(() => "still running"),
+        ]),
+        launch.output(),
+      ).toBe(1);
+      const failure =
+        "agent-server exited before startup completed (code=3, signal=null). Last output:";
+      expect(launch.output()).toContain(failure);
+      const lastOutput = launch
+        .output()
+        .slice(launch.output().indexOf(failure));
+      expect(lastOutput).toContain("Resolving openhands-agent-server");
+      expect(lastOutput).toContain(
+        "error: Failed to fetch: network unreachable",
+      );
     }, 30_000);
   },
 );
