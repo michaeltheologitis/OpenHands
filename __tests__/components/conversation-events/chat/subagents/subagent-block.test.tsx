@@ -68,6 +68,13 @@ const renderCell = (cell: ACPToolCallEvent, historyComplete = true) =>
     </SubagentHistoryContext.Provider>,
   );
 
+/** Seed the root's call c1 and the events under it, then render the call. */
+const renderRun = (...events: OpenHandsEvent[]) => {
+  const cell = call(1, "c1");
+  seed(cell, ...events);
+  return renderCell(cell);
+};
+
 const rowOf = (sessionId: string) => {
   const row = document.querySelector<HTMLElement>(
     `[data-testid="subagent-row"][data-acp-session-id="${sessionId}"]`,
@@ -77,6 +84,12 @@ const rowOf = (sessionId: string) => {
 };
 
 const user = userEvent.setup();
+
+/** `renderRun`, then open the call's sub-agent block. */
+const openRun = async (...events: OpenHandsEvent[]) => {
+  renderRun(...events);
+  await user.click(screen.getByTestId("subagent-block-toggle"));
+};
 
 /** Expand a row and return its transcript. */
 const expandRow = async (sessionId: string) => {
@@ -95,17 +108,13 @@ describe("sub-agents under the call that spawned them", () => {
   });
 
   it("shows a collapsed summary counting children by state", () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
+    renderRun(
       child(2, "n2", { cell: "c1" }),
       child(3, "n3", { cell: "c1" }),
       child(4, "n4", { cell: "c1" }),
       child(5, "n2", { cell: "c1", state: "idle", stopReason: "end_turn" }),
       child(6, "n4", { cell: "c1", state: "idle" }),
     );
-
-    renderCell(cell);
 
     const toggle = screen.getByTestId("subagent-block-toggle");
     expect(toggle).toHaveTextContent("3 sub-agents · 2 done · 1 running");
@@ -120,18 +129,14 @@ describe("sub-agents under the call that spawned them", () => {
 
   // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
   it("expands to each child's cells and their own sub-agents", async () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
+    await openRun(
       child(2, "n2", { cell: "c1" }),
       call(3, "c2", { session: "n2" }),
       child(4, "n3", { parent: "n2", cell: "c2" }),
       call(5, "c3", { session: "n3" }),
       child(6, "n4", { parent: "n3", cell: "c3" }),
     );
-    renderCell(cell);
 
-    await user.click(screen.getByTestId("subagent-block-toggle"));
     const n2Cell = within(await expandRow("n2")).getByTestId("acp-tool-call");
     expect(n2Cell).toHaveAttribute("data-acp-session-id", "n2");
     expect(n2Cell).toHaveAttribute("data-acp-tool-call-id", "c2");
@@ -147,16 +152,12 @@ describe("sub-agents under the call that spawned them", () => {
   // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
   it("shows each child's latest cost and never a sum when costs are shown", async () => {
     writeShowSubagentCosts(true);
-    const cell = call(1, "c1");
-    seed(
-      cell,
+
+    await openRun(
       child(2, "n2", { cell: "c1", cost: 0.0004 }),
       child(3, "n3", { cell: "c1", cost: 0.0002 }),
       child(4, "n2", { cell: "c1", cost: 0.0009 }),
     );
-    renderCell(cell);
-
-    await user.click(screen.getByTestId("subagent-block-toggle"));
 
     expect(within(rowOf("n2")).getByTestId("subagent-cost")).toHaveTextContent(
       "$0.0009",
@@ -171,17 +172,12 @@ describe("sub-agents under the call that spawned them", () => {
 
   // @spec SUB-005 — Each sub-agent shows its latest state; an unconfirmed state never shows a spinner
   it("shows the last known state without a spinner after a reconnect", async () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
+    await openRun(
       child(2, "n2", { cell: "c1", cancellable: true }),
       reconnect(3, "n2", { cell: "c1" }),
     );
-    renderCell(cell);
 
     const toggle = screen.getByTestId("subagent-block-toggle");
-    await user.click(toggle);
-
     const row = rowOf("n2");
     expect(row).toHaveAttribute("data-subagent-status", "unconfirmed");
     expect(row).toHaveAttribute("data-subagent-stale");
@@ -208,10 +204,7 @@ describe("sub-agents under the call that spawned them", () => {
   ])(
     "marks a %s / %s child with %s beside its status",
     async (state, stopReason, icon) => {
-      const cell = call(1, "c1");
-      seed(cell, child(2, "n2", { cell: "c1", state, stopReason }));
-      renderCell(cell);
-      await user.click(screen.getByTestId("subagent-block-toggle"));
+      await openRun(child(2, "n2", { cell: "c1", state, stopReason }));
 
       const toggle = within(rowOf("n2")).getByTestId("subagent-row-toggle");
       const icons = [
@@ -225,9 +218,7 @@ describe("sub-agents under the call that spawned them", () => {
   );
 
   it("shows a child's task first and its answer last", async () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
+    await openRun(
       child(2, "n2", { cell: "c1", title: "Summarize CS101" }),
       message(3, "task", { from: ROOT_ID, to: "n2", text: "Summarize CS101." }),
       text(4, "n2", "Reading the catalog.", { thought: true }),
@@ -239,8 +230,6 @@ describe("sub-agents under the call that spawned them", () => {
       }),
       child(7, "n2", { cell: "c1", state: "idle", stopReason: "end_turn" }),
     );
-    renderCell(cell);
-    await user.click(screen.getByTestId("subagent-block-toggle"));
 
     const row = rowOf("n2");
     expect(within(row).getByTestId("subagent-answer")).toHaveTextContent(
@@ -260,9 +249,7 @@ describe("sub-agents under the call that spawned them", () => {
 
   // @spec SUB-001 — Each ACP sub-agent session renders inside the tool call that spawned it, recursively
   it("shows a child's task to its own child only as that child's task", async () => {
-    const cell = call(1, "c1");
-    seed(
-      cell,
+    await openRun(
       child(2, "n2", { cell: "c1" }),
       call(3, "c2", { session: "n2" }),
       child(4, "n3", { parent: "n2", cell: "c2", title: "Read CS201" }),
@@ -272,9 +259,7 @@ describe("sub-agents under the call that spawned them", () => {
         text: "Check the prerequisites of CS201.",
       }),
     );
-    renderCell(cell);
 
-    await user.click(screen.getByTestId("subagent-block-toggle"));
     const n2Transcript = await expandRow("n2");
     await user.click(within(n2Transcript).getByTestId("subagent-block-toggle"));
     const n3Transcript = await expandRow("n3");
@@ -309,10 +294,8 @@ describe("sub-agents under the call that spawned them", () => {
     const stopOf = (sessionId: string) =>
       within(rowOf(sessionId)).queryByTestId("subagent-stop");
 
-    const seedStoppableRun = () => {
-      const cell = call(1, "c1");
-      seed(
-        cell,
+    const openStoppableRun = () =>
+      openRun(
         child(2, "n2", { cell: "c1", title: "Read CS201", cancellable: true }),
         child(3, "n3", { cell: "c1", cancellable: false }),
         // An agent may keep a finished child's grant; the route answers 409.
@@ -325,13 +308,10 @@ describe("sub-agents under the call that spawned them", () => {
         child(5, "n5", { cell: "c1", cancellable: true }),
         reconnect(6, "n5", { cell: "c1" }),
       );
-      return cell;
-    };
 
     // @spec SUB-007 — Stop is offered only for a running sub-agent that granted cancel on the live connection
     it("offers Stop only for a running child that granted cancel", async () => {
-      renderCell(seedStoppableRun());
-      await user.click(screen.getByTestId("subagent-block-toggle"));
+      await openStoppableRun();
 
       expect(stopOf("n2")).toHaveAttribute("data-subagent-stop", "ready");
       expect(stopOf("n2")).not.toHaveAttribute("aria-disabled", "true");
@@ -343,8 +323,7 @@ describe("sub-agents under the call that spawned them", () => {
 
     it("explains why Stop is unavailable when the agent withheld cancel", async () => {
       const cancel = vi.spyOn(EventService, "cancelAcpSession");
-      renderCell(seedStoppableRun());
-      await user.click(screen.getByTestId("subagent-block-toggle"));
+      await openStoppableRun();
 
       const withheld = stopOf("n3") as HTMLElement;
       expect(withheld).toHaveAttribute("aria-disabled", "true");
@@ -360,8 +339,7 @@ describe("sub-agents under the call that spawned them", () => {
       const cancel = vi
         .spyOn(EventService, "cancelAcpSession")
         .mockResolvedValue({ session_id: "n2", requested: true });
-      renderCell(seedStoppableRun());
-      await user.click(screen.getByTestId("subagent-block-toggle"));
+      await openStoppableRun();
 
       await user.click(stopOf("n2") as HTMLElement);
 
@@ -411,8 +389,7 @@ describe("sub-agents under the call that spawned them", () => {
       "shows the server's reason when a cancel is refused: %s",
       async (_case, error, shown) => {
         vi.spyOn(EventService, "cancelAcpSession").mockRejectedValue(error);
-        renderCell(seedStoppableRun());
-        await user.click(screen.getByTestId("subagent-block-toggle"));
+        await openStoppableRun();
 
         await user.click(stopOf("n2") as HTMLElement);
 
