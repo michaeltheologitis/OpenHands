@@ -3,6 +3,7 @@ import { BrandButton } from "#/components/features/settings/brand-button";
 import { ToggleSwitch } from "#/ui/toggle-switch";
 import { I18nKey } from "#/i18n/declaration";
 import type { InstalledCanvasExtensionInfo } from "#/types/canvas-extension";
+import { useCanvasExtensionsRuntime } from "./canvas-extensions-runtime";
 import {
   extensionModuleCardPillClassName,
   extensionModuleCardSurfaceClassName,
@@ -24,8 +25,14 @@ export function CanvasExtensionCard({
   onUninstall,
 }: CanvasExtensionCardProps) {
   const { t } = useTranslation("openhands");
+  const { notices, errors } = useCanvasExtensionsRuntime();
   const pages = extension.manifest?.contributes?.pages ?? [];
+  const panels = extension.manifest?.contributes?.conversation_panels ?? [];
   const displayName = extension.manifest?.display_name || extension.name;
+  const notice = notices.get(extension.name);
+  const runtimeMessage =
+    errors.get(extension.name) ??
+    (notice ? t(notice, { name: displayName }) : null);
 
   return (
     <article
@@ -57,6 +64,15 @@ export function CanvasExtensionCard({
         </p>
       ) : null}
 
+      {runtimeMessage ? (
+        <p
+          role="status"
+          className="text-xs leading-relaxed text-tertiary-light"
+        >
+          {runtimeMessage}
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <span className={extensionModuleCardPillClassName}>
           {extension.enabled
@@ -71,6 +87,11 @@ export function CanvasExtensionCard({
         {pages.length ? (
           <span className={extensionModuleCardPillClassName}>
             {t(I18nKey.SETTINGS$APPS_PAGES)}: {pages.length}
+          </span>
+        ) : null}
+        {panels.length ? (
+          <span className={extensionModuleCardPillClassName}>
+            {t(I18nKey.SETTINGS$APPS_PANELS)}: {panels.length}
           </span>
         ) : null}
       </div>
@@ -98,12 +119,15 @@ export function CanvasExtensionCard({
         ) : null}
       </dl>
 
-      {pages.length ? (
+      {pages.length || panels.length ? (
         <section className="flex min-w-0 flex-col gap-2">
           <ul className="flex flex-wrap gap-2">
-            {pages.map((page) => (
-              <li key={page.id} className={extensionModuleCardPillClassName}>
-                {page.title}
+            {[...pages, ...panels].map((contribution) => (
+              <li
+                key={contribution.id}
+                className={extensionModuleCardPillClassName}
+              >
+                {contribution.title}
               </li>
             ))}
           </ul>

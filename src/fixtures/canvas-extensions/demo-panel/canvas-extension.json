@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "demo-panel",
+  "display_name": "Demo panel",
+  "version": "0.1.0",
+  "description": "A dependency-free fixture for Canvas conversation panels.",
+  "entrypoint": "extension.js",
+  "contributes": {
+    "conversation_panels": [
+      {
+        "id": "demo",
+        "title": "Demo panel",
+        "icon": "icon.svg",
+        "tabs": [
+          { "id": "overview", "title": "Overview", "path": "/" },
+          { "id": "details", "title": "Details", "path": "/details" }
+        ]
+      }
+    ]
+  }
+}
