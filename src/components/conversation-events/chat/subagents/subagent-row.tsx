@@ -4,12 +4,16 @@ import { Check, LoaderCircle, Square } from "lucide-react";
 import ArrowDown from "#/icons/angle-down-solid.svg?react";
 import ArrowUp from "#/icons/angle-up-solid.svg?react";
 import { I18nKey } from "#/i18n/declaration";
-import { getSubagentStatus } from "#/utils/subagents/subagent-status";
+import {
+  formatSubagentCost,
+  getSubagentStatus,
+} from "#/utils/subagents/subagent-status";
 import {
   MAX_INDENTED_DEPTH,
   statusLabel,
   SUBAGENT_TOOL_CALLS_I18N_KEY,
 } from "./subagent-labels";
+import { useShowSubagentCosts } from "./subagent-cost-preference";
 import { useSubagents } from "./subagent-source";
 import { StopSubagentButton } from "./stop-subagent-button";
 import { SubagentTranscript } from "./subagent-transcript";
@@ -21,7 +25,10 @@ export interface SubagentRowProps {
 
 const firstLineOf = (text: string) => text.trim().split("\n", 1)[0];
 
-/** One child: status, title, answer, tool calls, Stop; its transcript. */
+/**
+ * One child: status, title, answer, tool calls, cost (when shown), Stop; its
+ * transcript.
+ */
 export const SubagentRow = React.memo(function SubagentRow({
   sessionId,
   depth,
@@ -33,6 +40,7 @@ export const SubagentRow = React.memo(function SubagentRow({
   const answer = useSubagents((index) =>
     stats?.answerKey ? index.messages.get(stats.answerKey) : undefined,
   );
+  const showCost = useShowSubagentCosts();
 
   if (!record) return null;
 
@@ -41,6 +49,9 @@ export const SubagentRow = React.memo(function SubagentRow({
     record.latest.title || t(I18nKey.SUBAGENTS$UNTITLED, { id: sessionId });
   const answerText = answer?.latest.text
     ? firstLineOf(answer.latest.text)
+    : null;
+  const cost = showCost
+    ? formatSubagentCost(record.latest.cost, record.latest.cost_currency)
     : null;
   const Chevron = expanded ? ArrowUp : ArrowDown;
 
@@ -110,6 +121,11 @@ export const SubagentRow = React.memo(function SubagentRow({
             {t(SUBAGENT_TOOL_CALLS_I18N_KEY, { count: stats?.toolCalls ?? 0 })}
           </span>
         </button>
+        {cost && (
+          <span data-testid="subagent-cost" className="flex-shrink-0 text-xs">
+            {cost}
+          </span>
+        )}
         <StopSubagentButton sessionId={sessionId} title={title} />
       </div>
       {expanded && <SubagentTranscript sessionId={sessionId} depth={depth} />}

@@ -8,6 +8,7 @@ import {
   SubagentSourceContext,
   useStaticSubagentSource,
 } from "#/components/conversation-events/chat/subagents/subagent-source";
+import { writeShowSubagentCosts } from "#/components/conversation-events/chat/subagents/subagent-cost-preference";
 import EventService from "#/api/event-service/event-service.api";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { useEventStore } from "#/stores/use-event-store";
@@ -101,6 +102,7 @@ const expandRow = async (sessionId: string) => {
 describe("sub-agents under the call that spawned them", () => {
   beforeEach(() => {
     useEventStore.getState().clearEvents();
+    window.localStorage.clear();
     vi.restoreAllMocks();
     vi.mocked(displayErrorToast).mockReset();
   });
@@ -145,6 +147,27 @@ describe("sub-agents under the call that spawned them", () => {
     expect(n3Cell).toHaveAttribute("data-acp-tool-call-id", "c3");
     expect(rowOf("n2")).toContainElement(rowOf("n3"));
     expect(n3Cell).toContainElement(rowOf("n4"));
+  });
+
+  // @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
+  it("shows each child's latest cost and never a sum when costs are shown", async () => {
+    writeShowSubagentCosts(true);
+
+    await openRun(
+      child(2, "n2", { cell: "c1", cost: 0.0004 }),
+      child(3, "n3", { cell: "c1", cost: 0.0002 }),
+      child(4, "n2", { cell: "c1", cost: 0.0009 }),
+    );
+
+    expect(within(rowOf("n2")).getByTestId("subagent-cost")).toHaveTextContent(
+      "$0.0009",
+    );
+    expect(within(rowOf("n3")).getByTestId("subagent-cost")).toHaveTextContent(
+      "$0.0002",
+    );
+    expect(screen.getByTestId("subagent-block-toggle")).not.toHaveTextContent(
+      "$",
+    );
   });
 
   // @spec SUB-005 — Each sub-agent shows its latest state; an unconfirmed state never shows a spinner

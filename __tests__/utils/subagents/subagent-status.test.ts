@@ -3,6 +3,7 @@ import type { ACPSubagentEvent } from "#/types/agent-server/core/events/acp-suba
 import type { SubagentRecord } from "#/utils/subagents/subagent-index";
 import {
   canStopSubagent,
+  formatSubagentCost,
   getSubagentStatus,
   isStopWithheld,
   summarizeSubagents,
@@ -120,6 +121,20 @@ describe("Stop", () => {
       expect(isStopWithheld(record)).toBe(withheld);
     },
   );
+});
+
+// @spec SUB-006 — Costs show only when the setting is on; then each sub-agent shows its latest reported cost, never a sum
+describe("formatSubagentCost", () => {
+  it.each([
+    [null, "USD", null],
+    [undefined, undefined, null],
+    [0.0004, "USD", "$0.0004"],
+    [0, "USD", "$0.0000"],
+    [0.0004, "EUR", "0.0004 EUR"],
+    [0.0004, null, "0.0004"],
+  ])("formats %s %s as %s", (cost, currency, shown) => {
+    expect(formatSubagentCost(cost, currency)).toBe(shown);
+  });
 });
 
 describe("summarizeSubagents", () => {
