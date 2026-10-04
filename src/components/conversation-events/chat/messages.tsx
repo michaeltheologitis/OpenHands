@@ -1,6 +1,7 @@
 import React from "react";
 import { ActionEvent, OpenHandsEvent } from "#/types/agent-server/core";
 import {
+  isACPToolCallEvent,
   isActionEvent,
   isObservationEvent,
 } from "#/types/agent-server/type-guards";
@@ -13,6 +14,18 @@ import { useModelStore } from "#/stores/model-store";
 import { ModelMessages } from "#/components/features/chat/model-messages";
 import { useOptionalConversationId } from "#/hooks/use-conversation-id";
 import { ConversationConfirmationButtons } from "#/components/shared/buttons/conversation-confirmation-buttons";
+import { ROOT_SESSION, toolCallKey } from "#/utils/subagents/subagent-keys";
+import {
+  anchorsForParent,
+  NO_SUBAGENT_ANCHORS,
+} from "#/utils/subagents/subagent-placement";
+import { interleaveSubagentAnchors } from "./subagents/main-flow-anchors";
+import { SubagentRow } from "./subagents/subagent-row";
+import {
+  SubagentHistoryContext,
+  useSubagents,
+} from "./subagents/subagent-source";
+import { UnplacedSubagents } from "./subagents/unplaced-subagents";
 
 interface MessagesProps {
   messages: OpenHandsEvent[]; // UI events (actions replaced by observations)
@@ -21,6 +34,16 @@ interface MessagesProps {
 
 const getLastEventId = (events: OpenHandsEvent[]) => events.at(-1)?.id;
 const getLastEvent = (events: OpenHandsEvent[]) => events.at(-1);
+
+/**
+ * Stable across an ACP call's started → terminal replacement, so its card,
+ * and the sub-agents under it, keep their expanded state when it completes.
+ */
+function renderKeyOf(event: OpenHandsEvent): string | undefined {
+  return isACPToolCallEvent(event)
+    ? `acp-${toolCallKey(event.acp_session_id, event.tool_call_id)}`
+    : event.id;
+}
 
 export const Messages: React.FC<MessagesProps> = React.memo(
   ({ messages, allEvents }) => {
@@ -76,13 +99,43 @@ export const Messages: React.FC<MessagesProps> = React.memo(
       [messages, allEvents],
     );
 
+    // Sub-agents placed in the root's flow without a spawning call go where
+    // the root sent them their task, else where they were announced.
+    const placedAtRoot = useSubagents((index) =>
+      index.placement.byAnchor.get(ROOT_SESSION),
+    );
+    const pendingSubagents = useSubagents((index) => index.placement.pending);
+    const toolCalls = useSubagents((index) => index.toolCalls);
+    const historyComplete = React.useContext(SubagentHistoryContext);
+    const flow = React.useMemo(
+      () =>
+        interleaveSubagentAnchors(
+          renderedItems,
+          anchorsForParent(
+            placedAtRoot ?? NO_SUBAGENT_ANCHORS,
+            pendingSubagents,
+            ROOT_SESSION,
+            historyComplete,
+          ),
+          toolCalls,
+        ),
+      [
+        renderedItems,
+        placedAtRoot,
+        pendingSubagents,
+        toolCalls,
+        historyComplete,
+      ],
+    );
+    const lastRenderedItem = renderedItems.at(-1);
+
     const renderEventMessage = (
       event: OpenHandsEvent,
       index: number,
       suppressThought: boolean,
     ) => (
       <EventMessage
-        key={event.id}
+        key={renderKeyOf(event)}
         event={event}
         correspondingAction={
           isObservationEvent(event) && event.action_id
@@ -98,10 +151,21 @@ export const Messages: React.FC<MessagesProps> = React.memo(
 
     return (
       <>
-        {renderedItems.map((item, itemIndex) => {
+        {flow.map((item) => {
+          if (item.kind === "subagent") {
+            return (
+              <ul
+                key={`subagent-${item.anchor.sessionId}`}
+                className="flex flex-col"
+              >
+                <SubagentRow sessionId={item.anchor.sessionId} depth={1} />
+              </ul>
+            );
+          }
+
           if (item.kind === "single") {
             return (
-              <React.Fragment key={`single-${item.event.id}`}>
+              <React.Fragment key={`single-${renderKeyOf(item.event)}`}>
                 {/* Thoughts for singles are also hoisted as their own
                     "thought" item, so suppress the inline render to avoid
                     duplication. */}
@@ -124,7 +188,7 @@ export const Messages: React.FC<MessagesProps> = React.memo(
           // it, signalling the agent has moved on. While the group is still
           // the live tail, it keeps showing the latest action title as its
           // prominent summary.
-          const isFinalized = itemIndex < renderedItems.length - 1;
+          const isFinalized = item !== lastRenderedItem;
           const groupKey = item.events[0]?.id ?? `group-${item.startIndex}`;
           return (
             <React.Fragment key={`group-${groupKey}`}>
@@ -145,6 +209,7 @@ export const Messages: React.FC<MessagesProps> = React.memo(
             </React.Fragment>
           );
         })}
+        <UnplacedSubagents />
         <ConversationConfirmationButtons />
       </>
     );
