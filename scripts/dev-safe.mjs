@@ -26,12 +26,15 @@ import {
 // Docker entrypoint can run it as a CLI. Re-exported below for back-compat
 // (dev-with-automation.mjs and tests still import it from here).
 import { buildRuntimeServicesInfo } from "./runtime-services-info.mjs";
-import { validateGitRepoUrl } from "./launcher-defaults.mjs";
+import {
+  applyLauncherDefaults,
+  validateGitRepoUrl,
+} from "./launcher-defaults.mjs";
 import { fileLog, stripAnsi } from "./logger.mjs";
 
 // ── Centralized config (single source of truth for versions, ports, etc.) ───
 const __dev_safe_dirname = path.dirname(fileURLToPath(import.meta.url));
-const SHARED_DEFAULTS = JSON.parse(
+export const SHARED_DEFAULTS = JSON.parse(
   readFileSync(
     path.join(__dev_safe_dirname, "..", "config", "defaults.json"),
     "utf-8",
@@ -990,6 +993,7 @@ function spawnProcess(command, args, options = {}) {
 }
 
 async function main() {
+  applyLauncherDefaults(process.env, SHARED_DEFAULTS);
   console.log("Starting isolated agent-server + frontend dev stack...");
   fileLog("info", "Starting isolated agent-server + frontend dev stack...");
   validateFrontendDependencies();

@@ -100,6 +100,41 @@ A full 40-character commit SHA is installed once and reused: the launcher passes
 - `VITE_WORKING_DIR` — repo root used for new conversations (defaults to the current checkout)
 - `OH_APP_BACKEND_PUBLIC_URL` — origin the agent-server serves Canvas App backends on. Its App-backend bridge answers 503 until one is set, and it must differ from the origin Canvas is served on, so the launchers default it to the agent-server's own address, `http://127.0.0.1:<agent-server port>` (Canvas is served on another port, as `localhost`). An explicit value wins.
 
+### Building from a fork: `config/defaults.json`
+
+A packaged desktop app started from Finder or a desktop launcher reads no shell environment. A build that runs its own SDK fork or keeps its own state says so in `config/defaults.json` instead. Upstream's file carries these keys as `null`.
+
+```json
+{
+  "sources": {
+    "agentServerGitRepo": "https://github.com/<owner>/software-agent-sdk",
+    "agentServerGitRef": "<full commit SHA>"
+  },
+  "paths": { "stateDir": "~/.example-app/agent-canvas" }
+}
+```
+
+The `sources` and `paths` keys are fallbacks for environment variables of the same meaning. Each launcher fills a variable only when it is unset, so environment variables still win, one by one:
+
+| Key                          | Fills                      | Only when                                                                                                                  |
+| ---------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `sources.agentServerGitRepo` | `OH_AGENT_SERVER_GIT_REPO` | the variable is unset                                                                                                      |
+| `sources.agentServerGitRef`  | `OH_AGENT_SERVER_GIT_REF`  | the environment names no agent-server source (`OH_AGENT_SERVER_LOCAL_PATH`, `OH_AGENT_SERVER_GIT_REF`, `OH_AGENT_SERVER_VERSION`) |
+| `paths.stateDir`             | `OH_CANVAS_SAFE_STATE_DIR` | the variable is unset; an absolute path or one starting with `~/`                                                           |
+| `paths.stateDir`             | `OH_SECRET_KEY_PATH`, `OH_SESSION_API_KEY_PATH` (`secret-key.txt` and `api-key.txt` inside it) | the state directory came from this file, and each variable is unset |
+
+Pin the ref to a full commit SHA so relaunches need no network. Every value is checked on every launch, even when the environment wins, so a broken file fails with the key's name. The full-stack launchers log which variables came from the file (`[defaults] From config/defaults.json: …`). Everything in `defaults.json` is also compiled into the frontend bundle, so it must never hold a secret.
+
+**The state directory's parent is the persistence root.** The agent-server is given `OH_PERSISTENCE_DIR`, the parent of the state directory, so with `paths.stateDir` set to `<P>/<name>`:
+
+| Under                           | What                                                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<P>/<name>/`                   | conversations, workspaces, bash events, tmux sockets, automation file storage, `secret-key.txt`, `api-key.txt`                                        |
+| `<P>/`                          | the agent-server's and SDK's state: settings, secrets, workspaces, agent and LLM profiles, installed Canvas Apps and their backends, skills, plugins, hooks |
+| `<P>/automation/automations.db` | the automation backend's database                                                                                                                     |
+
+A build that keeps its own state names a directory whose parent is its own, such as `~/.example-app/agent-canvas`. One under `~/.openhands` shares everything except conversations with a stock Agent Canvas on the same machine.
+
 ## Alternative development workflows
 
 ### Multiple local backends (shared persistence)
