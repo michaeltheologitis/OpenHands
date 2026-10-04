@@ -2,7 +2,10 @@ import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ACPSessionControlsEvent } from "@openhands/typescript-client";
+import {
+  HttpError,
+  type ACPSessionControlsEvent,
+} from "@openhands/typescript-client";
 import { localAgentServerHasCapability } from "#/api/agent-server-compatibility";
 import {
   __resetActiveStoreForTests,
@@ -89,6 +92,16 @@ const gatewayTimeout = Object.assign(
   ),
   { name: "HttpError", status: 504, response: gatewayTimeoutBody },
 );
+// Not a refusal either: only a 422 carries the agent's sentence.
+const answered = (status: number, statusText: string, detail: string) =>
+  new HttpError(
+    status,
+    statusText,
+    { detail },
+    `HTTP request failed (${status} ${statusText}): ${JSON.stringify({ detail })}`,
+  );
+const badRequest = answered(400, "Bad Request", "profile must be a string");
+const notFound = answered(404, "Not Found", "Conversation not found");
 const clientTimeout = new Error("Request timeout after 60000ms", {
   cause: new DOMException("The operation timed out.", "TimeoutError"),
 });
@@ -259,6 +272,8 @@ describe("useConversationAgentControls", () => {
       gatewayTimeout,
       gatewayTimeout.message,
     ],
+    ["a 400 with a detail", badRequest, badRequest.message],
+    ["a 404 with a detail", notFound, notFound.message],
     ["a client timeout", clientTimeout, BACKEND_REQUEST_TIMEOUT_MESSAGE],
     ["a lost connection", lostConnection, CORS_OR_NETWORK_ERROR_MESSAGE],
   ])(

@@ -1,13 +1,11 @@
-import {
-  getSdkHttpServerErrorReason,
-  isSdkHttpStatusError,
-} from "#/api/agent-server-compatibility";
+import { isSdkHttpStatusError } from "#/api/agent-server-compatibility";
 import type { Backend } from "#/api/backend-registry/types";
 import CanvasExtensionsService, {
   type AppBackendSession,
 } from "#/api/canvas-extensions-service";
 import i18n from "#/i18n";
 import { I18nKey } from "#/i18n/declaration";
+import { getApiErrorBody } from "#/utils/api-error-message";
 import type {
   CanvasExtensionAppBackendError,
   CanvasExtensionAppBackendErrorReason,
@@ -74,7 +72,11 @@ export function toAppBackendError(
   extensionName: string,
 ): CanvasExtensionAppBackendError {
   if (isSdkHttpStatusError(error, SERVICE_UNAVAILABLE)) {
-    const reason = getSdkHttpServerErrorReason(error) ?? "";
+    // The agent-server's error handler moves a 5xx's reason under `exception`.
+    const { exception } = (getApiErrorBody(error) ?? {}) as {
+      exception?: unknown;
+    };
+    const reason = typeof exception === "string" ? exception : "";
     if (/not ready/i.test(reason)) {
       return appBackendError("not-ready", extensionName);
     }

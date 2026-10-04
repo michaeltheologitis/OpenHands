@@ -26,7 +26,6 @@ import {
   isAgentServerUnavailableError,
   isAgentServerUnknownVersionError,
   isAgentServerUnsupportedVersionError,
-  getSdkHttpErrorDetail,
   loadAgentServerInfo,
   localAgentServerHasCapability,
   MINIMUM_COMPATIBLE_AGENT_SERVER_VERSION,
@@ -489,38 +488,5 @@ describe("localAgentServerHasCapability", () => {
     setActiveSelection({ backendId: otherLocal.id });
 
     expect(localAgentServerHasCapability(capability)).toBe(false);
-  });
-});
-
-describe("getSdkHttpErrorDetail", () => {
-  const sdkError = (status: number, response: unknown) =>
-    Object.assign(new Error(`HTTP request failed (${status})`), {
-      name: "HttpError",
-      status,
-      response,
-    });
-
-  it("reads the agent-server's detail sentence from an SDK HTTP error", () => {
-    const sentence =
-      "namespace is fixed once a conversation has started (it is 'router').";
-
-    expect(getSdkHttpErrorDetail(sdkError(422, { detail: sentence }))).toBe(
-      sentence,
-    );
-  });
-
-  it.each([
-    ["a validation error list", sdkError(422, { detail: [{ msg: "x" }] })],
-    ["a body without detail", sdkError(502, null)],
-    [
-      "a 5xx answer, whose detail is the agent-server's placeholder",
-      sdkError(504, {
-        detail: "Internal Server Error",
-        exception: "504: Timed out waiting for the ACP agent",
-      }),
-    ],
-    ["an error that is not an SDK HTTP error", new Error("offline")],
-  ])("is null for %s", (_label, error) => {
-    expect(getSdkHttpErrorDetail(error)).toBeNull();
   });
 });

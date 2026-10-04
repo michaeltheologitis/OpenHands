@@ -6,7 +6,6 @@ import type {
   ACPSessionControls,
 } from "@openhands/typescript-client";
 import {
-  getSdkHttpErrorDetail,
   isSdkHttpStatusError,
   localAgentServerHasCapability,
 } from "#/api/agent-server-compatibility";
@@ -23,6 +22,7 @@ import {
 import { useLatestAcpSessionControls } from "#/hooks/query/use-latest-acp-session-controls";
 import { useAcpModelContext } from "#/hooks/use-acp-model-context";
 import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
+import { getApiErrorMessage } from "#/utils/api-error-message";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 import { retrieveAxiosErrorMessage } from "#/utils/retrieve-axios-error-message";
 
@@ -143,7 +143,9 @@ export function useConversationAgentControls(
         {
           onError: (error) =>
             displayErrorToast(
-              getSdkHttpErrorDetail(error) ?? retrieveAxiosErrorMessage(error),
+              isSdkHttpStatusError(error, AGENT_REFUSAL_STATUS)
+                ? getApiErrorMessage(error, error.message)
+                : retrieveAxiosErrorMessage(error),
             ),
         },
       ),
@@ -194,7 +196,7 @@ export function useHomeAgentControls(
     launch &&
     preview.isError &&
     isSdkHttpStatusError(preview.error, AGENT_REFUSAL_STATUS)
-      ? (getSdkHttpErrorDetail(preview.error) ?? preview.error.message)
+      ? getApiErrorMessage(preview.error, preview.error.message)
       : null;
   // The agent's sentence for the pick it refused last, until the next pick.
   const lastRefusal = React.useRef<{
