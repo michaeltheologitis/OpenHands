@@ -33,6 +33,9 @@ Agent Server as `ACPSubagentEvent`, `ACPSessionMessageEvent`, `ACPSessionTextEve
 ### SUB-009: Agents without sub-agent sessions
 - [x] Agents without sub-agent sessions shall render as before.
 
+### SUB-010: Responsive under load
+- [x] 50 sub-agents × 5 tool calls arriving at 60 events per second shall leave the chat responsive to scrolling within 1 s, with every sub-agent expanded.
+
 ### SUB-011: Stable test ids
 - [x] These test ids and data attributes are stable; renaming one is a breaking change for the end-to-end tests that use them:
   - `acp-tool-call` (root or child call): `data-acp-tool-call-id`; `data-acp-session-id` (absent for the root); `data-acp-tool-call-status`: `pending`, `in_progress`, `completed`, `failed`.
