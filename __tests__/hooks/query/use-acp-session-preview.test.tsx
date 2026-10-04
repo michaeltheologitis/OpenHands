@@ -380,6 +380,27 @@ describe("useHomeAgentControls", () => {
     },
   );
 
+  // @spec ASC-004 — Only where the agent-server supports them
+  it.each([400, 504])(
+    "keeps a pick whose preview answers %i after an earlier answer, and shows no sentence for it",
+    async (status) => {
+      const { result } = renderHome();
+      await waitFor(() =>
+        expect(commandsOf(result.current)).toEqual(["summarize"]),
+      );
+      preview().mockRejectedValue(httpError(status, "unavailable"));
+
+      act(() => result.current.setOption("profile", "thorough"));
+
+      await waitFor(() => expect(preview()).toHaveBeenCalledTimes(2));
+      await settle();
+      expect(result.current).toMatchObject({ options: [], rejection: null });
+      expect(useHomeAgentOptionsStore.getState().values).toEqual({
+        profile: "thorough",
+      });
+    },
+  );
+
   it.each([
     [
       "the agent-server lacks acp_session_controls_v1",
