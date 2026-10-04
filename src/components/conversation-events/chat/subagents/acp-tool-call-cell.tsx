@@ -10,7 +10,7 @@ export interface AcpToolCallCellProps {
   depth: number;
 }
 
-/** Today's ACP card, plus the sub-agents the call spawned. */
+/** The ACP tool-call card, with the sub-agents the call spawned below it. */
 export function AcpToolCallCell({ event, depth }: AcpToolCallCellProps) {
   return (
     <div

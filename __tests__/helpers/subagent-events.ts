@@ -6,7 +6,7 @@ import type {
 } from "#/types/agent-server/core/events/acp-subagent-event";
 
 /**
- * Builders for the events S1's agent-server stores for ACP sub-agent sessions,
+ * Builders for the events the agent-server stores for ACP sub-agent sessions,
  * field for field, so a test reads like a run: `call(1, "c1")` is the root's
  * spawning cell at tick 1, `child(2, "n2", { cell: "c1" })` announces a child
  * in it, and so on. Fields the agent-server leaves unset are absent, as its

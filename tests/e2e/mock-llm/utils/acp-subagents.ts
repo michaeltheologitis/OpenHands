@@ -3,9 +3,8 @@
  * agent-server: the SDK's scripted ACP agent, the rendered and the stored
  * sub-agent trees, a generated fan-out transcript and a scroll probe.
  *
- * Shared with other suites that run the scripted agent; the page-side readers
- * select only through the stable test ids of specs/acp-subagent-sessions.md
- * (SUB-011).
+ * The page-side readers select only through the stable test ids of
+ * specs/acp-subagent-sessions.md (SUB-011).
  */
 
 import { delimiter, join, resolve } from "node:path";
@@ -42,16 +41,13 @@ export const SCRIPTED_ACP_PROFILE = "scripted-acp-subagents";
 export interface ScriptedAcpAgentOptions {
   /** Flags after the script, e.g. `["--subagents", "--cancel-wait", "30"]`. */
   flags: readonly string[];
-  /** Write `acp_subagents: true` on the profile (S1's opt-in). */
+  /** Write `acp_subagents: true` on the profile: the opt-in. */
   subagents: boolean;
 }
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-/**
- * Save and activate an ACP agent profile that runs the scripted agent.
- * Shared with C2's end-to-end tests; whichever lands first creates it.
- */
+/** Save and activate an ACP agent profile that runs the scripted agent. */
 export async function configureScriptedAcpAgent(
   request: APIRequestContext,
   { flags, subagents }: ScriptedAcpAgentOptions,
@@ -88,7 +84,7 @@ export async function configureScriptedAcpAgent(
   ).toBe(true);
 }
 
-/** Remove the scripted agent's profile; the caller re-activates its own. */
+/** Remove the scripted agent's profile; no other profile is activated. */
 export async function deleteScriptedAcpAgent(request: APIRequestContext) {
   await request.delete(
     `${BACKEND_URL}/api/agent-profiles/${SCRIPTED_ACP_PROFILE}`,
@@ -321,10 +317,10 @@ const update = (sessionId: string, body: Record<string, unknown>) => ({
 });
 
 /**
- * Write an agent-outgoing JSONL transcript (S1 §4.10's format) of one root
- * cell fanning out to `children` sub-agents with `cellsPerChild` cells each,
- * each cell a thought, a call and a cost report, interleaved as concurrent
- * children are; returns the file's path.
+ * Write an agent-outgoing JSONL transcript, in the scripted agent's format, of
+ * one root cell fanning out to `children` sub-agents with `cellsPerChild`
+ * cells each, each cell a thought, a call and a cost report, interleaved as
+ * concurrent children are; returns the file's path.
  */
 export async function writeFanoutTranscript(
   directory: string,

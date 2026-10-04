@@ -106,7 +106,7 @@ describe("Stop", () => {
     ["requires_action", true, "agent", true, false],
     ["running", false, "agent", false, true],
     ["requires_action", false, "agent", false, true],
-    // A finished dr-acp child keeps its grant, and the route answers 409.
+    // An agent may keep a finished child's grant; the route answers 409.
     ["idle", true, "agent", false, false],
     ["idle", false, "agent", false, false],
     ["unknown", true, "agent", false, false],

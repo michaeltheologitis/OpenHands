@@ -27,7 +27,7 @@ export function useShowSubagentCosts(): boolean {
   );
 }
 
-/** The App settings switch is its one writer. */
+/** Save the choice; this tab applies it at once, others on `storage`. */
 export function writeShowSubagentCosts(show: boolean): void {
   window.localStorage.setItem(
     SHOW_SUBAGENT_COSTS_STORAGE_KEY,

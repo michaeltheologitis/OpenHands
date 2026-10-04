@@ -59,7 +59,10 @@ const hasPlaceableAncestry = (
   return true;
 };
 
-/** S1 §5 rule 2's fallbacks: the parent's message to the child, else its announcement. */
+/**
+ * Where a child goes when it is in no call: at its parent's message to it,
+ * else at its announcement.
+ */
 const fallbackAnchor = (
   [sessionId, record]: Entry,
   parent: SessionRef,
@@ -100,10 +103,11 @@ const reuseLists = <K, V>(
   );
 
 /**
- * S1 §5 rules 1–2 over the loaded records, with partial history: a child
- * whose parent session or named spawning call is not loaded is pending, not
- * misplaced. Reuses `previous`'s arrays, maps and summaries wherever the
- * result is equal, so selectors keep their references.
+ * Each child goes in the tool call that spawned it, else at its fallback in
+ * its parent's flow, over the loaded records: a child whose parent session or
+ * named spawning call is not loaded is pending, not misplaced. Reuses
+ * `previous`'s arrays, maps and summaries wherever the result is equal, so
+ * selectors keep their references.
  */
 export function placeSubagents(
   records: SubagentRecords,

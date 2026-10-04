@@ -317,7 +317,7 @@ describe("sub-agents under the call that spawned them", () => {
         cell,
         child(2, "n2", { cell: "c1", title: "Read CS201", cancellable: true }),
         child(3, "n3", { cell: "c1", cancellable: false }),
-        // A finished dr-acp child keeps its grant; the route answers 409.
+        // An agent may keep a finished child's grant; the route answers 409.
         child(4, "n4", {
           cell: "c1",
           state: "idle",

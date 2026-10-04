@@ -37,8 +37,8 @@ function refusalReason(error: unknown): string | null {
 
 /**
  * Cancel one ACP sub-agent session. Success means only that the request was
- * sent: the row shows "Stopping…" until the child's own idle/cancelled
- * snapshot arrives. A refusal shows the server's reason in an error toast.
+ * sent; the child's own idle/cancelled snapshot confirms the stop. A refusal
+ * shows the server's reason in an error toast.
  */
 export function useCancelAcpSession() {
   const { t } = useTranslation("openhands");

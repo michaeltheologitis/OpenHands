@@ -13,7 +13,7 @@ export type SubagentStatusCategory =
 
 export interface SubagentStatus {
   category: SubagentStatusCategory;
-  /** `state` or `state / stop_reason` as reported, for `other` and tooltips. */
+  /** `state` or `state / stop_reason`; `other` shows it as reported. */
   reported: string | null;
   /**
    * The status is the last one the agent confirmed before the agent-server's

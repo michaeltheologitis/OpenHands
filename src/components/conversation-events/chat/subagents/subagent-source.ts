@@ -22,7 +22,7 @@ export interface SubagentSource {
   readonly readOnly?: boolean;
 }
 
-/** Defaults to the live event store, so the chat needs no provider. */
+/** Defaults to the live event store: a live conversation needs no provider. */
 export const SubagentSourceContext =
   React.createContext<SubagentSource>(useEventStore);
 

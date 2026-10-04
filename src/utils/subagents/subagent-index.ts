@@ -45,18 +45,15 @@ export interface SubagentRecord {
 }
 
 export interface ToolCallRecord {
-  /** The newest event of the call: started, then terminal. */
+  /** Started, then terminal. */
   latest: ACPToolCallEvent;
-  /** The earliest loaded event's timestamp: where the call sits. */
   firstAt: string;
   /** A pending or in_progress event of the call is loaded. */
   startLoaded: boolean;
 }
 
 export interface MessageRecord {
-  /** The newest version of the message (ACP messages are upserts). */
   latest: ACPSessionMessageEvent;
-  /** The earliest loaded version's timestamp: where the message sits. */
   firstAt: string;
 }
 
@@ -99,7 +96,7 @@ export interface SubagentAnchor {
   sessionId: string;
   /** Timestamp the child is placed at in its parent's flow. */
   at: string;
-  /** S1 §5 rule 2: the parent's message to the child, else the announcement. */
+  /** The parent's message to the child, else its announcement. */
   via: "message" | "announcement";
 }
 
@@ -165,8 +162,8 @@ export const EMPTY_SUBAGENT_INDEX: SubagentIndex = {
 /**
  * Fold events into the index. Pure; returns `index` itself when no event
  * concerns ACP sessions, and otherwise a new index that reuses every record,
- * transcript, cell list and summary the events did not change. Events already
- * folded must not be passed again (the event store dedupes by id first).
+ * transcript, cell list and summary the events did not change. Each event
+ * must be folded once: dedupe by id first, as `buildSubagentIndex` does.
  */
 export function foldSubagentEvents(
   index: SubagentIndex,

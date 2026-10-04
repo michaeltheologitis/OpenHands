@@ -48,7 +48,7 @@ describe("foldSubagentEvents", () => {
       child(4, "n3", { parent: "n2", cell: "c2" }),
       call(5, "c3", { session: "n3" }),
       child(6, "n4", { parent: "n3", cell: "c3" }),
-      // The spawning call arrives on a later snapshot of n2; S1 keeps it.
+      // The spawning call arrives on a later snapshot of n2, which keeps it.
       child(7, "n2", { cell: "c1" }),
     );
 
