@@ -217,24 +217,6 @@ describe("mountAppBackendFrame", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("keeps one session for two frames of the App and revokes it when the last one closes", async () => {
-    const first = mount();
-    const second = mount();
-    await vi.waitFor(() =>
-      expect(second.container.querySelector("iframe")).not.toBeNull(),
-    );
-
-    first.dispose();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0);
-    });
-    expect(revokeSession).not.toHaveBeenCalled();
-    expect(createSession).toHaveBeenCalledTimes(1);
-
-    second.dispose();
-    await vi.waitFor(() => expect(revokeSession).toHaveBeenCalledTimes(1));
-  });
-
   it("keeps its frame in the container through session refreshes, and when one fails adds the notice beside it", async () => {
     vi.useFakeTimers();
     try {

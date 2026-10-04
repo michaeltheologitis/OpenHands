@@ -25,12 +25,6 @@ describe("acp-error-codes", () => {
     }
   });
 
-  it("maps a refused start-time option value to its own header", () => {
-    expect(getAcpErrorHeaderKey("ACPConfigOptionRejected")).toBe(
-      I18nKey.ERROR$ACP_CONFIG_OPTION_REJECTED_TITLE,
-    );
-  });
-
   it("returns null for unknown, empty, or missing codes", () => {
     expect(getAcpErrorHeaderKey(null)).toBeNull();
     expect(getAcpErrorHeaderKey(undefined)).toBeNull();

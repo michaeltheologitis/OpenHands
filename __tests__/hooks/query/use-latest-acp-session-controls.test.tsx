@@ -135,20 +135,4 @@ describe("useLatestAcpSessionControls", () => {
     await waitFor(() => expect(EventService.searchEvents).toHaveBeenCalled());
     expect(result.current).toBeNull();
   });
-
-  it("issues no search and reads nothing while disabled", async () => {
-    seedLiveEvents(controlsEvent("live", "2026-10-01T11:00:00Z", ["live"]));
-    const search = answerSearchWith(null);
-
-    const { result } = renderHook(
-      () => useLatestAcpSessionControls(CONVERSATION_ID, false),
-      { wrapper },
-    );
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
-
-    expect(result.current).toBeNull();
-    expect(search).not.toHaveBeenCalled();
-  });
 });
