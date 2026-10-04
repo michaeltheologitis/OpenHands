@@ -273,6 +273,26 @@ describe("sub-agents under the call that spawned them", () => {
     expect(n2Transcript).not.toHaveTextContent("To Read CS201");
   });
 
+  // @spec SUB-002 — Without a loaded spawning call, a sub-agent renders at its parent's message to it, else at its announcement
+  it("puts a grandchild anchored at the instant a child's call starts after that call", async () => {
+    await openRun(
+      child(2, "n2", { cell: "c1" }),
+      call(4, "c2", { session: "n2" }),
+      child(4, "n3", { parent: "n2" }),
+      call(6, "c3", { session: "n2" }),
+    );
+
+    const transcript = await expandRow("n2");
+    const [tied, next] = within(transcript).getAllByTestId("acp-tool-call");
+
+    expect(tied.compareDocumentPosition(rowOf("n3"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(rowOf("n3").compareDocumentPosition(next)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   // @spec SUB-008 — Opening a conversation loads the older history its visible sub-agents need, and no more
   it("says earlier activity is loading while the cell's start is missing", () => {
     const cell = call(9, "c1", { status: "completed" });
