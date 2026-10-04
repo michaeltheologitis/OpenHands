@@ -739,11 +739,70 @@ function spawnService(name, command, args, options = {}) {
   return proc;
 }
 
-async function waitForService(name, url, timeoutMs = 30000) {
+// How many of a service's last output lines an early-exit error quotes.
+const EXIT_OUTPUT_TAIL_LINES = 10;
+
+/**
+ * Follow a spawned service until it is gone: its exit (`close`, so every
+ * output line has arrived) or spawn error, and its last output lines.
+ *
+ * @param {import("node:child_process").ChildProcess} proc
+ */
+function watchServiceExit(proc) {
+  const watch = { exit: null, spawnError: null, tail: [] };
+  const remember = (data) => {
+    watch.tail.push(
+      ...data
+        .toString()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+    watch.tail.splice(0, watch.tail.length - EXIT_OUTPUT_TAIL_LINES);
+  };
+  proc.stdout?.on("data", remember);
+  proc.stderr?.on("data", remember);
+  proc.once("error", (error) => {
+    watch.spawnError = error;
+  });
+  proc.once("close", (code, signal) => {
+    watch.exit = { code, signal };
+  });
+  return watch;
+}
+
+function formatServiceExit(name, watch) {
+  const head = watch.spawnError
+    ? `${name} could not be started (${watch.spawnError.message}).`
+    : `${name} exited before startup completed (code=${watch.exit.code ?? "null"}, signal=${watch.exit.signal ?? "null"}).`;
+  if (watch.tail.length === 0) return head;
+  return [
+    `${head} Last output:`,
+    ...watch.tail.map((line) => `  ${line}`),
+  ].join("\n");
+}
+
+/**
+ * Poll `url` until it answers 200 or `timeoutMs` passes.
+ *
+ * @param {string} name
+ * @param {string} url
+ * @param {number} [timeoutMs]
+ * @param {import("node:child_process").ChildProcess} [proc] the service's
+ *   process; when given, its exit before `url` answers fails the wait at once
+ * @returns {Promise<boolean>} true when ready, false on timeout
+ * @throws {Error} naming the exit code and last output lines when `proc`
+ *   exits (or fails to start) before `url` answers
+ */
+async function waitForService(name, url, timeoutMs = 30000, proc = null) {
   const start = Date.now();
   let lastError = null;
+  const watch = proc ? watchServiceExit(proc) : null;
 
   while (Date.now() - start < timeoutMs) {
+    if (watch?.exit) {
+      throw new Error(formatServiceExit(name, watch));
+    }
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
@@ -984,7 +1043,7 @@ function startAgentServer(config) {
     LOG_JSON: "true",
   };
 
-  spawnService(
+  return spawnService(
     "agent-server",
     agentServerCmd.command,
     [
@@ -1636,14 +1695,19 @@ async function main(options = {}) {
   // which can take several minutes. Dropping the user into a half-booted UI
   // before that completes triggers axios "Request timeout" popups on the first
   // SPA fetch that hits an unbound port 18000.
+  //
+  // An agent-server process that exits before it answers (uvx failing at
+  // once on a bad ref or no network) fails the launch at once, with its exit
+  // code and last output lines, instead of running out that timeout.
   if (config.launchAgentServer) {
     const agentServerStarter = startAgentServerOverride ?? startAgentServer;
-    agentServerStarter(config);
+    const agentServerProcess = agentServerStarter(config);
 
     agentServerReady = await waitForService(
       "agent-server",
       `${getAgentServerBaseUrl(config)}/server_info`,
       agentServerReadyTimeoutMs,
+      agentServerProcess,
     );
   }
 
