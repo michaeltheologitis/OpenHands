@@ -29,102 +29,86 @@ const forkSource = defaultsWith({
   sources: { agentServerGitRepo: forkRepo, agentServerGitRef: commitSha },
 });
 
+const stateDir = "/srv/example-app/agent-canvas";
+const homeStateDir = path.join(home, ".example-app", "agent-canvas");
+const withStateDir = (dir: string) =>
+  defaultsWith({ paths: { stateDir: dir } });
+const keyFilesIn = (dir: string) => ({
+  OH_SECRET_KEY_PATH: path.join(dir, "secret-key.txt"),
+  OH_SESSION_API_KEY_PATH: path.join(dir, "api-key.txt"),
+});
+
 describe("launcherDefaultsEnv", () => {
-  it("fills the agent-server's git repo and ref from defaults when the environment names no source", () => {
-    expect(launcherDefaultsEnv({}, forkSource, home)).toEqual({
-      OH_AGENT_SERVER_GIT_REPO: forkRepo,
-      OH_AGENT_SERVER_GIT_REF: commitSha,
-    });
-  });
-
-  it.each([
-    ["OH_AGENT_SERVER_LOCAL_PATH", "/abs/path/to/software-agent-sdk"],
-    ["OH_AGENT_SERVER_GIT_REF", "feature-branch"],
-    ["OH_AGENT_SERVER_VERSION", "1.18.0"],
-  ])(
-    "an agent-server source in the environment wins over the defaults' ref (%s)",
-    (name, value) => {
-      const filled = launcherDefaultsEnv({ [name]: value }, forkSource, home);
-
-      expect(filled).not.toHaveProperty("OH_AGENT_SERVER_GIT_REF");
-    },
-  );
-
-  it("the defaults' repo still applies to a ref from the environment", () => {
-    const filled = launcherDefaultsEnv(
+  it.each<
+    [
+      string,
+      Record<string, string>,
+      Record<string, unknown>,
+      Record<string, string>,
+    ]
+  >([
+    [
+      "fills the agent-server's git repo and ref from defaults when the environment names no source",
+      {},
+      forkSource,
+      {
+        OH_AGENT_SERVER_GIT_REPO: forkRepo,
+        OH_AGENT_SERVER_GIT_REF: commitSha,
+      },
+    ],
+    [
+      "an agent-server source in the environment wins over the defaults' ref (OH_AGENT_SERVER_LOCAL_PATH)",
+      { OH_AGENT_SERVER_LOCAL_PATH: "/abs/path/to/software-agent-sdk" },
+      forkSource,
+      { OH_AGENT_SERVER_GIT_REPO: forkRepo },
+    ],
+    [
+      "an agent-server source in the environment wins over the defaults' ref (OH_AGENT_SERVER_VERSION)",
+      { OH_AGENT_SERVER_VERSION: "1.18.0" },
+      forkSource,
+      { OH_AGENT_SERVER_GIT_REPO: forkRepo },
+    ],
+    [
+      "the defaults' repo still applies to a ref from the environment",
       { OH_AGENT_SERVER_GIT_REF: "feature-branch" },
       forkSource,
-      home,
-    );
-
-    expect(filled).toEqual({ OH_AGENT_SERVER_GIT_REPO: forkRepo });
-  });
-
-  it("the environment's repo wins over the defaults' repo", () => {
-    const filled = launcherDefaultsEnv(
+      { OH_AGENT_SERVER_GIT_REPO: forkRepo },
+    ],
+    [
+      "the environment's repo wins over the defaults' repo",
       { OH_AGENT_SERVER_GIT_REPO: "https://github.com/someone/else" },
       forkSource,
-      home,
-    );
-
-    expect(filled).toEqual({ OH_AGENT_SERVER_GIT_REF: commitSha });
-  });
-
-  it("fills the state directory from defaults, expanding ~/ to the home directory", () => {
-    const filled = launcherDefaultsEnv(
+      { OH_AGENT_SERVER_GIT_REF: commitSha },
+    ],
+    [
+      "fills the state directory from defaults, expanding ~/ to the home directory",
       {},
-      defaultsWith({ paths: { stateDir: "~/.example-app/agent-canvas" } }),
-      home,
-    );
-
-    expect(filled.OH_CANVAS_SAFE_STATE_DIR).toBe(
-      path.join(home, ".example-app", "agent-canvas"),
-    );
-  });
-
-  it("moves both key files into a state directory named by defaults", () => {
-    const filled = launcherDefaultsEnv(
+      withStateDir("~/.example-app/agent-canvas"),
+      { OH_CANVAS_SAFE_STATE_DIR: homeStateDir, ...keyFilesIn(homeStateDir) },
+    ],
+    [
+      "moves both key files into a state directory named by defaults",
       {},
-      defaultsWith({ paths: { stateDir: "/srv/example-app/agent-canvas" } }),
-      home,
-    );
-
-    expect(filled).toEqual({
-      OH_CANVAS_SAFE_STATE_DIR: "/srv/example-app/agent-canvas",
-      OH_SECRET_KEY_PATH: path.join(
-        "/srv/example-app/agent-canvas",
-        "secret-key.txt",
-      ),
-      OH_SESSION_API_KEY_PATH: path.join(
-        "/srv/example-app/agent-canvas",
-        "api-key.txt",
-      ),
-    });
-  });
-
-  it("leaves the key files alone when the environment names the state directory", () => {
-    const filled = launcherDefaultsEnv(
+      withStateDir(stateDir),
+      { OH_CANVAS_SAFE_STATE_DIR: stateDir, ...keyFilesIn(stateDir) },
+    ],
+    [
+      "leaves the key files alone when the environment names the state directory",
       { OH_CANVAS_SAFE_STATE_DIR: "/tmp/my-state" },
-      defaultsWith({ paths: { stateDir: "/srv/example-app/agent-canvas" } }),
-      home,
-    );
-
-    expect(filled).toEqual({});
-  });
-
-  it("key file paths in the environment win over the defaults' state directory", () => {
-    const filled = launcherDefaultsEnv(
+      withStateDir(stateDir),
+      {},
+    ],
+    [
+      "key file paths in the environment win over the defaults' state directory",
       {
         OH_SECRET_KEY_PATH: "/keys/secret.txt",
         OH_SESSION_API_KEY_PATH: "/keys/api.txt",
       },
-      defaultsWith({ paths: { stateDir: "/srv/example-app/agent-canvas" } }),
-      home,
-    );
-
-    expect(filled).toEqual({
-      OH_CANVAS_SAFE_STATE_DIR: "/srv/example-app/agent-canvas",
-    });
+      withStateDir(stateDir),
+      { OH_CANVAS_SAFE_STATE_DIR: stateDir },
+    ],
+  ])("%s", (_name, env, defaults, expected) => {
+    expect(launcherDefaultsEnv(env, defaults, home)).toEqual(expected);
   });
 
   it("returns nothing for defaults whose launcher keys are null", () => {
@@ -142,11 +126,7 @@ describe("launcherDefaultsEnv", () => {
 
   it("rejects a relative state directory, naming the key", () => {
     expect(() =>
-      launcherDefaultsEnv(
-        environmentWins,
-        defaultsWith({ paths: { stateDir: "state" } }),
-        home,
-      ),
+      launcherDefaultsEnv(environmentWins, withStateDir("state"), home),
     ).toThrow(
       "paths.stateDir in config/defaults.json must be an absolute path or start with ~/, got: state",
     );
@@ -195,7 +175,7 @@ describe("applyLauncherDefaults", () => {
 
     const filled = applyLauncherDefaults(env, {
       ...forkSource,
-      paths: { stateDir: "/srv/example-app/agent-canvas" },
+      paths: { stateDir },
     });
 
     expect(filled).toEqual([

@@ -1137,22 +1137,27 @@ describe("setup command", () => {
         vi.useRealTimers();
       });
 
-      it("a command still running at its timeout is stopped and rejects", async () => {
-        const command = node(
-          "console.log(`pid ${process.pid}`); setInterval(() => {}, 1_000)",
-        );
+      it.skipIf(process.platform === "win32")(
+        "a command still running at its timeout is stopped, with its background children, and rejects",
+        async () => {
+          const command = ["sh", "-c", "sleep 300 & echo $$ $!; wait"];
 
-        const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
-        const [, pid] = await printed(/^pid (\d+)$/);
-        vi.advanceTimersByTime(200);
-        const error = await stopped;
+          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
+          const [, shell, child] = await printed(/^(\d+) (\d+)$/);
+          expect(hasExited(Number(child))).toBe(false);
+          vi.advanceTimersByTime(200);
+          const error = await stopped;
 
-        expect(error).toMatchObject({
-          message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
-          reason: "timeout",
-        });
-        expect(() => process.kill(Number(pid), 0)).toThrow(/ESRCH/);
-      });
+          expect(error).toMatchObject({
+            message: `Setup command \`${command.join(" ")}\` was stopped after 200 ms before the stack started. Its output is in the startup log.`,
+            reason: "timeout",
+          });
+          expect(() => process.kill(Number(shell), 0)).toThrow(/ESRCH/);
+          await expect
+            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
+            .toBe(true);
+        },
+      );
 
       it.skipIf(process.platform === "win32")(
         "a command that ignores SIGTERM is killed with SIGKILL 3 s later",
@@ -1169,24 +1174,6 @@ describe("setup command", () => {
           const error = await stopped;
 
           expect(error).toMatchObject({ reason: "timeout", signal: "SIGKILL" });
-        },
-      );
-
-      it.skipIf(process.platform === "win32")(
-        "the stop reaches the command's background children",
-        async () => {
-          const command = ["sh", "-c", "sleep 300 & echo background $!; wait"];
-
-          const stopped = run(command, { timeoutMs: 200 }).catch((e) => e);
-          const [, child] = await printed(/^background (\d+)$/);
-          expect(hasExited(Number(child))).toBe(false);
-          vi.advanceTimersByTime(200);
-          const error = await stopped;
-
-          expect(error).toMatchObject({ reason: "timeout" });
-          await expect
-            .poll(() => hasExited(Number(child)), { timeout: 10_000 })
-            .toBe(true);
         },
       );
 
