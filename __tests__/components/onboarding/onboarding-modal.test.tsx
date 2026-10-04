@@ -30,6 +30,15 @@ const getAgentProfileMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ profile: { id: "default-profile-id" } }),
 );
 const activateAgentProfileMock = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+const seededDefaultAgentProfile = {
+  id: "default-profile-id",
+  name: "default",
+  agent_kind: "openhands" as const,
+  revision: 1,
+  llm_profile_ref: null,
+  mcp_server_refs: null,
+};
+const listAgentProfilesMock = vi.hoisted(() => vi.fn());
 let captureMock: MockInstance<typeof telemetry.trackEvent>;
 
 // Both the backend status badge in the embedded edit form and the
@@ -53,6 +62,7 @@ vi.mock("@openhands/typescript-client/clients", () => ({
       saveAgentProfile: vi.fn((...args) => saveAgentProfileMock(...args)),
       getAgentProfile: vi.fn((...args) => getAgentProfileMock(...args)),
       activateAgentProfile: vi.fn((...args) => activateAgentProfileMock(...args)),
+      listAgentProfiles: vi.fn(() => listAgentProfilesMock()),
     };
   }),
 }));
@@ -165,6 +175,9 @@ async function waitForConfiguredBackendToBeSkipped() {
 }
 
 async function completeAgentStep(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() =>
+    expect(screen.getByTestId("onboarding-agent-next")).toBeEnabled(),
+  );
   await user.click(screen.getByTestId("onboarding-agent-next"));
   await waitFor(
     () =>
@@ -228,6 +241,10 @@ beforeEach(() => {
   // ACP secret-write checks and the LLM-defaults mock) don't see calls
   // leaked from a prior test. Covers `llmSettingsScreenMock` too.
   vi.clearAllMocks();
+  listAgentProfilesMock.mockResolvedValue({
+    profiles: [seededDefaultAgentProfile],
+    active_agent_profile_id: seededDefaultAgentProfile.id,
+  });
   getServerInfoMock.mockReset();
   getServerInfoMock.mockImplementation((options?: { host?: string }) => {
     if (options?.host?.startsWith("https://127.0.0.1:8000")) {
@@ -1005,6 +1022,91 @@ describe("OnboardingModal", () => {
     );
     expect(SecretsService.createSecret).not.toHaveBeenCalled();
   });
+
+  it("preselects the active agent profile and leaves it active when onboarding finishes unchanged", async () => {
+    listAgentProfilesMock.mockResolvedValue({
+      profiles: [
+        seededDefaultAgentProfile,
+        {
+          ...seededDefaultAgentProfile,
+          id: "deep-reasoner-id",
+          name: "deep_reasoner",
+          agent_kind: "acp",
+        },
+      ],
+      active_agent_profile_id: "deep-reasoner-id",
+    });
+    const onClose = vi.fn();
+    renderModal(onClose);
+    const user = userEvent.setup();
+
+    await waitForConfiguredBackendToBeSkipped();
+    const kept = await screen.findByTestId(
+      "onboarding-agent-option-active-profile",
+    );
+    expect(kept).toHaveAttribute("aria-checked", "true");
+    expect(kept).toHaveTextContent("deep_reasoner");
+
+    // Keeping the profile needs no setup: the next slide is Say Hello.
+    await completeAgentStep(user);
+    expect(
+      within(screen.getByTestId("onboarding-slide-1")).getByTestId(
+        "onboarding-step-say-hello",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-progress-step-2")).toBeNull();
+    await user.click(screen.getByTestId("onboarding-hello-close"));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(saveAgentProfileMock).not.toHaveBeenCalled();
+    expect(activateAgentProfileMock).not.toHaveBeenCalled();
+    expect(SettingsService.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("holds the agent step's Next until the active agent profile is known", async () => {
+    listAgentProfilesMock.mockReturnValue(new Promise(() => {}));
+    renderModal();
+
+    await waitForConfiguredBackendToBeSkipped();
+
+    expect(screen.getByTestId("onboarding-agent-next")).toBeDisabled();
+  });
+
+  it.each([
+    [
+      "only the seeded default profile is active",
+      {
+        profiles: [seededDefaultAgentProfile],
+        active_agent_profile_id: seededDefaultAgentProfile.id,
+      },
+    ],
+    [
+      "no agent profile is active",
+      { profiles: [seededDefaultAgentProfile], active_agent_profile_id: null },
+    ],
+  ])(
+    "keeps OpenHands preselected and the LLM setup step when %s",
+    async (_case, profiles) => {
+      listAgentProfilesMock.mockResolvedValue(profiles);
+      renderModal();
+      const user = userEvent.setup();
+
+      await waitForConfiguredBackendToBeSkipped();
+      await completeAgentStep(user);
+
+      expect(
+        screen.queryByTestId("onboarding-agent-option-active-profile"),
+      ).toBeNull();
+      expect(
+        screen.getByTestId("onboarding-agent-option-openhands"),
+      ).toHaveAttribute("aria-checked", "true");
+      expect(
+        within(screen.getByTestId("onboarding-slide-1")).getByTestId(
+          "onboarding-step-setup-llm",
+        ),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("pre-fills the say-hello input with the default greeting on the final step", async () => {
     renderModal();

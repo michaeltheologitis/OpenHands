@@ -32605,6 +32605,23 @@
     "tr": "Sohbetlerinizi yürütecek aracı seçin. Bunu daha sonra değiştirebilirsiniz.",
     "uk": "Виберіть агента, який вестиме ваші розмови. Це можна змінити пізніше."
   },
+  "ONBOARDING$AGENT_ACTIVE_PROFILE_DESCRIPTION": {
+    "en": "Your current agent profile. Keep it as the agent for new conversations.",
+    "ja": "現在のエージェントプロファイルです。新しい会話のエージェントとしてそのまま使用します。",
+    "zh-CN": "你当前的智能体配置文件。保留它作为新对话的智能体。",
+    "zh-TW": "你目前的代理設定檔。保留它作為新對話的代理。",
+    "ko-KR": "현재 에이전트 프로필입니다. 새 대화의 에이전트로 계속 사용합니다.",
+    "no": "Din nåværende agentprofil. Behold den som agenten for nye samtaler.",
+    "ar": "ملف تعريف الوكيل الحالي. احتفظ به كوكيل للمحادثات الجديدة.",
+    "de": "Ihr aktuelles Agentenprofil. Behalten Sie es als Agenten für neue Unterhaltungen.",
+    "fr": "Votre profil d'agent actuel. Conservez-le comme agent pour les nouvelles conversations.",
+    "it": "Il tuo profilo agente attuale. Mantienilo come agente per le nuove conversazioni.",
+    "pt": "Seu perfil de agente atual. Mantenha-o como o agente para novas conversas.",
+    "es": "Tu perfil de agente actual. Consérvalo como el agente para las nuevas conversaciones.",
+    "ca": "El teu perfil d'agent actual. Conserva'l com a agent per a les noves converses.",
+    "tr": "Mevcut aracı profiliniz. Yeni sohbetler için aracı olarak koruyun.",
+    "uk": "Ваш поточний профіль агента. Залиште його агентом для нових розмов."
+  },
   "ONBOARDING$AGENT_OPENHANDS_DESCRIPTION": {
     "en": "The default OpenHands agent. Best for general-purpose coding and exploration.",
     "ja": "デフォルトの OpenHands エージェント。汎用的なコーディングや探索に最適です。",

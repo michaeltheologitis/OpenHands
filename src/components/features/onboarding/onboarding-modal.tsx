@@ -16,11 +16,14 @@ import { cn } from "#/utils/utils";
 import { useActiveBackendContext } from "#/contexts/active-backend-context";
 import { useBackendsHealth } from "#/hooks/query/use-backends-health";
 import { useSettings } from "#/hooks/query/use-settings";
+import { useActiveAgentProfile } from "#/hooks/use-active-agent-profile";
+import { ONBOARDING_AGENT_PROFILE_NAME } from "#/hooks/mutation/use-apply-onboarding-agent-profile";
 import { useTracking } from "#/hooks/use-tracking";
 import { OnboardingProgressBar } from "./onboarding-progress-bar";
 import {
+  ACTIVE_AGENT_PROFILE_OPTION_ID,
   ChooseAgentStep,
-  type OnboardingAgentId,
+  type OnboardingAgentChoice,
 } from "./steps/choose-agent-step";
 import { CheckBackendStep } from "./steps/check-backend-step";
 import { SetupLlmStep } from "./steps/setup-llm-step";
@@ -169,9 +172,30 @@ export function OnboardingModal({
     healthByBackendId[backend.id]?.isConnected === true &&
     (lockedCloudHost === null || isActiveLockedCloudBackend);
 
-  const slideOrder = skipBackendStep
-    ? PHASE_ORDER_WITHOUT_BACKEND
-    : PHASE_ORDER_WITH_BACKEND;
+  // Onboarding rewrites its own seeded `default` profile; any other active
+  // profile is the user's (or their app's) choice, offered first and kept
+  // untouched unless they pick another agent.
+  const { activeProfile, isLoading: isActiveProfileLoading } =
+    useActiveAgentProfile();
+  const keptProfile =
+    activeProfile?.name === ONBOARDING_AGENT_PROFILE_NAME
+      ? null
+      : activeProfile;
+  const [chosenAgentId, setChosenAgentId] =
+    React.useState<OnboardingAgentChoice | null>(null);
+  const selectedAgentId: OnboardingAgentChoice =
+    chosenAgentId ??
+    (keptProfile ? ACTIVE_AGENT_PROFILE_OPTION_ID : "openhands");
+  const keepsActiveProfile = selectedAgentId === ACTIVE_AGENT_PROFILE_OPTION_ID;
+
+  const slideOrder = React.useMemo(() => {
+    const order = skipBackendStep
+      ? PHASE_ORDER_WITHOUT_BACKEND
+      : PHASE_ORDER_WITH_BACKEND;
+    return keepsActiveProfile
+      ? order.filter((slide) => slide !== "setup")
+      : order;
+  }, [skipBackendStep, keepsActiveProfile]);
 
   const [phase, setPhase] = React.useState<OnboardingPhase>(
     () =>
@@ -179,8 +203,6 @@ export function OnboardingModal({
         Math.min(Math.max(initialStep, 0), PHASE_ORDER_WITH_BACKEND.length - 1)
       ],
   );
-  const [selectedAgentId, setSelectedAgentId] =
-    React.useState<OnboardingAgentId>("openhands");
   const [skipGettingStartedChecklist, setSkipGettingStartedChecklist] =
     React.useState(() => readSidebarOnboardingChecklistDismissed());
 
@@ -349,26 +371,30 @@ export function OnboardingModal({
               >
                 <ChooseAgentStep
                   selectedAgentId={selectedAgentId}
-                  onSelect={setSelectedAgentId}
+                  activeProfile={keptProfile}
+                  isActiveProfileLoading={isActiveProfileLoading}
+                  onSelect={setChosenAgentId}
                   onBack={skipBackendStep ? undefined : goBack}
                   onNext={goNext}
                 />
               </Slide>
-              <Slide
-                index={slideOrder.indexOf("setup")}
-                currentStep={currentStep}
-              >
-                {isOpenHands ? (
-                  <SetupLlmStep onBack={goBack} onNext={goNext} />
-                ) : (
-                  <SetupAcpSecretsStep
-                    providerKey={selectedAgentId}
-                    isActive={currentPhase === "setup"}
-                    onBack={goBack}
-                    onNext={goNext}
-                  />
-                )}
-              </Slide>
+              {keepsActiveProfile ? null : (
+                <Slide
+                  index={slideOrder.indexOf("setup")}
+                  currentStep={currentStep}
+                >
+                  {isOpenHands ? (
+                    <SetupLlmStep onBack={goBack} onNext={goNext} />
+                  ) : (
+                    <SetupAcpSecretsStep
+                      providerKey={selectedAgentId}
+                      isActive={currentPhase === "setup"}
+                      onBack={goBack}
+                      onNext={goNext}
+                    />
+                  )}
+                </Slide>
+              )}
               <Slide
                 index={slideOrder.indexOf("hello")}
                 currentStep={currentStep}
