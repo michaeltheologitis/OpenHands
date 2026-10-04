@@ -7,6 +7,8 @@ import toast from "react-hot-toast";
 import { HomeChatLauncher } from "#/components/features/home/home-chat-launcher";
 import AgentServerConversationService from "#/api/conversation-service/agent-server-conversation-service.api";
 import AutomationService from "#/api/automation-service/automation-service.api";
+import AgentProfilesService from "#/api/agent-profiles-service/agent-profiles-service.api";
+import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
 import WorkspacesService from "#/api/workspaces-service/workspaces-service.api";
 import {
   LAST_LOCAL_WORKSPACE_MODE_STORAGE_KEY,
@@ -25,6 +27,15 @@ const mockUseConversationWorkspace = vi.fn();
 let mockImages: File[] = [];
 let mockFiles: File[] = [];
 let mockIsolated = false;
+const sessionControlsCapability = vi.hoisted(() => ({ value: false }));
+
+vi.mock("#/api/agent-server-compatibility", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("#/api/agent-server-compatibility")
+  >()),
+  localAgentServerHasCapability: (capability: string) =>
+    capability === "acp_session_controls_v1" && sessionControlsCapability.value,
+}));
 
 vi.mock("#/utils/send-message-with-attachments", () => ({
   sendMessageWithAttachments: (...args: unknown[]) =>
@@ -98,15 +109,20 @@ vi.mock("#/components/features/chat/custom-chat-input", () => ({
     onSubmit,
     disabled,
     placeholder,
+    agentControls,
   }: {
     onSubmit: (msg: string) => void;
     disabled?: boolean;
     placeholder?: string;
+    agentControls?: { commands: { name: string }[] };
   }) => (
     <button
       type="button"
       data-testid="stub-chat-submit"
       data-placeholder={placeholder}
+      data-agent-commands={agentControls?.commands
+        .map(({ name }) => name)
+        .join(",")}
       disabled={disabled}
       onClick={() => onSubmit("hello world")}
     >
@@ -722,5 +738,88 @@ describe("HomeChatLauncher", () => {
     expect(
       screen.getByTestId("recommended-automations-rail"),
     ).toBeInTheDocument();
+  });
+
+  // @spec ASC-002 — A conversation starts with values the preview accepted
+  describe("ACP agent controls", () => {
+    beforeEach(() => {
+      sessionControlsCapability.value = true;
+      useHomeAgentOptionsStore.setState({
+        launchKey: "local-id:null:acp-profile",
+        values: { profile: "thorough" },
+      });
+      vi.spyOn(AgentProfilesService, "listProfiles").mockResolvedValue({
+        profiles: [
+          { id: "acp-profile", name: "scripted", agent_kind: "acp" },
+        ] as never,
+        active_agent_profile_id: "acp-profile",
+      });
+      vi.spyOn(
+        AgentServerConversationService,
+        "previewAcpSession",
+      ).mockResolvedValue({
+        available_commands: [
+          { name: "summarize", description: "Summarize the input" },
+          { name: "compare", description: "Compare two things" },
+        ],
+        config_options: [
+          {
+            id: "profile",
+            name: "Profile",
+            type: "select",
+            current_value: "thorough",
+            options: [
+              { value: "fast", name: "fast" },
+              { value: "thorough", name: "thorough" },
+            ],
+          },
+        ],
+      });
+    });
+
+    afterEach(() => {
+      sessionControlsCapability.value = false;
+      useHomeAgentOptionsStore.setState({ launchKey: null, values: {} });
+    });
+
+    it("shows the previewed agent's commands and starts with the values its preview accepted", async () => {
+      const createSpy = vi
+        .spyOn(AgentServerConversationService, "createConversation")
+        .mockResolvedValue(makeConversationResponse());
+      renderLauncher();
+      const submit = screen.getByTestId("stub-chat-submit");
+      await waitFor(() =>
+        expect(submit).toHaveAttribute(
+          "data-agent-commands",
+          "summarize,compare",
+        ),
+      );
+
+      await userEvent.setup().click(submit);
+
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentProfileId: "acp-profile",
+          acpConfigOptions: { profile: "thorough" },
+        }),
+      );
+    });
+
+    it("previews nothing and starts with an unchanged request without the agent-server capability", async () => {
+      sessionControlsCapability.value = false;
+      const createSpy = vi
+        .spyOn(AgentServerConversationService, "createConversation")
+        .mockResolvedValue(makeConversationResponse());
+      renderLauncher();
+
+      await userEvent.setup().click(screen.getByTestId("stub-chat-submit"));
+
+      await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+      expect(createSpy.mock.calls[0][0]).not.toHaveProperty("acpConfigOptions");
+      expect(
+        AgentServerConversationService.previewAcpSession,
+      ).not.toHaveBeenCalled();
+    });
   });
 });

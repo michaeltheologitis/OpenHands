@@ -10,6 +10,7 @@ import { useModelInterceptor } from "#/hooks/chat/use-model-interceptor";
 import { useLlmConfigured } from "#/hooks/use-llm-configured";
 import { HOME_PROMPT_DRAFT_KEY } from "#/hooks/chat/use-draft-persistence";
 import { useChatAttachmentUpload } from "#/hooks/chat/use-chat-attachment-upload";
+import { useHomeAgentControls } from "#/hooks/chat/use-agent-controls";
 import { useConversationStore } from "#/stores/conversation-store";
 import type { WorkspaceMode } from "#/api/conversation-metadata-store";
 import { setPendingTaskAttachments } from "#/stores/pending-task-attachments-store";
@@ -89,6 +90,16 @@ export function HomeChatLauncher() {
     ? !!pendingWorkspace
     : !!pendingRepository && !!pendingBranch;
 
+  // The workspace a start would send (none when the backend isolates it).
+  const launchWorkingDir =
+    isLocal && pendingWorkspace && !isolated
+      ? pendingWorkspace.path
+      : undefined;
+  const agentControls = useHomeAgentControls({
+    workingDir: launchWorkingDir,
+    workspaceMode,
+  });
+
   const handleSubmit = (message: string) => {
     const trimmed = message.trim();
     const hasAttachments = images.length > 0 || files.length > 0;
@@ -119,10 +130,10 @@ export function HomeChatLauncher() {
     // (`HOME$ISOLATED_WORKSPACE_NOTICE`) and the user sees an error toast for a
     // selection they may not have noticed. Creation proceeds isolated instead;
     // the launcher still offers an explicit "clear" affordance for the UI.
-    if (isLocal && pendingWorkspace && !isolated) {
+    if (launchWorkingDir) {
       variables = {
         ...variables,
-        workingDir: pendingWorkspace.path,
+        workingDir: launchWorkingDir,
         workspaceMode,
       };
     } else if (!isLocal && pendingRepository && pendingBranch) {
@@ -134,6 +145,11 @@ export function HomeChatLauncher() {
           branch: pendingBranch.name,
         },
       };
+    }
+
+    // @spec ASC-002 — only values the agent's last preview accepted
+    if (Object.keys(agentControls.startValues).length > 0) {
+      variables = { ...variables, acpConfigOptions: agentControls.startValues };
     }
 
     // Explicitly-attached plugins are additive on top of any ambient set and
@@ -251,6 +267,7 @@ export function HomeChatLauncher() {
             onFilesPaste={handleUpload}
             placeholder={t(I18nKey.HOME$DESCRIBE_ENGINEERING_TASK)}
             disabled={isCreating || llmBlocked}
+            agentControls={agentControls}
           />
         </div>
 

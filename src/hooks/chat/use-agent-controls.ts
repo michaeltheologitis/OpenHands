@@ -1,14 +1,30 @@
+import React from "react";
 import type {
   ACPAvailableCommand,
   ACPConfigOption,
   ACPConfigOptionValues,
   ACPSessionControls,
 } from "@openhands/typescript-client";
-import { localAgentServerHasCapability } from "#/api/agent-server-compatibility";
+import {
+  isSdkHttpStatusError,
+  localAgentServerHasCapability,
+} from "#/api/agent-server-compatibility";
 import { useActiveBackend } from "#/contexts/active-backend-context";
 import { useSetAcpConfigOption } from "#/hooks/mutation/use-set-acp-config-option";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
+import { useAgentProfiles } from "#/hooks/query/use-agent-profiles";
+import {
+  resolveAcpLaunchProfile,
+  useAcpSessionPreview,
+  type AcpSessionPreview,
+  type HomeLaunchContext,
+} from "#/hooks/query/use-acp-session-preview";
 import { useLatestAcpSessionControls } from "#/hooks/query/use-latest-acp-session-controls";
+import { useAcpModelContext } from "#/hooks/use-acp-model-context";
+import { useHomeAgentOptionsStore } from "#/stores/home-agent-options-store";
+import { getApiErrorMessage } from "#/utils/api-error-message";
+
+export type { HomeLaunchContext };
 
 export interface AgentControls {
   /** The agent's slash commands now; replaced on every report. */
@@ -41,6 +57,13 @@ export const NO_AGENT_CONTROLS: HomeAgentControls = {
   startValues: NO_VALUES,
 };
 
+const LOADING_AGENT_CONTROLS: HomeAgentControls = {
+  ...NO_AGENT_CONTROLS,
+  isLoading: true,
+};
+
+const AGENT_REFUSAL_STATUS = 422;
+
 // @spec ASC-003 — The model option belongs to the model picker
 // Boolean options are left out until the bridge advertises boolean support.
 function pickerOptions(controls: ACPSessionControls): ACPConfigOption[] {
@@ -52,6 +75,35 @@ function pickerOptions(controls: ACPSessionControls): ACPConfigOption[] {
 function hasAgentControls(isAcp: boolean, isLocal: boolean): boolean {
   return (
     isAcp && isLocal && localAgentServerHasCapability("acp_session_controls_v1")
+  );
+}
+
+// @spec ASC-002 — A conversation starts with values the preview accepted
+function acceptedValues(preview: AcpSessionPreview): ACPConfigOptionValues {
+  return Object.fromEntries(
+    Object.entries(preview.values).filter(([id, value]) => {
+      const option = preview.controls.config_options.find(
+        (candidate) => candidate.id === id,
+      );
+      if (!option) return false;
+      return (
+        option.type !== "select" ||
+        option.options.some((choice) => choice.value === value)
+      );
+    }),
+  );
+}
+
+/** Values the user picked that the shown options do not have yet. */
+function changedValues(
+  values: ACPConfigOptionValues,
+  options: ACPConfigOption[],
+): ACPConfigOptionValues {
+  return Object.fromEntries(
+    Object.entries(values).filter(
+      ([id, value]) =>
+        options.find((option) => option.id === id)?.current_value !== value,
+    ),
   );
 }
 
@@ -85,5 +137,93 @@ export function useConversationAgentControls(
     isLoading: !event,
     setOption: (configId, value) =>
       setConfigOption.mutate({ conversationId, configId, value }),
+  };
+}
+
+/**
+ * The agent controls of the next conversation, from the agent-server's
+ * preview of the launch agent with the values the user picked. Only when the
+ * home screen's agent is ACP on a local agent-server with
+ * `acp_session_controls_v1`; otherwise none.
+ *
+ * They show the preview the agent last answered, and a start sends only that
+ * answer's values. A pick the agent refuses (a 422) is withdrawn: the picks
+ * return to that answer's values (none before any answer), so picking the
+ * refused value again asks again, and the agent's sentence stays until the
+ * next pick. Any other failure shows no controls; the user can still start.
+ */
+// @spec ASC-004 — Only where the agent-server supports them
+export function useHomeAgentControls(
+  launchContext: HomeLaunchContext,
+): HomeAgentControls {
+  const { backend, orgId } = useActiveBackend();
+  const { isHomeAcp } = useAcpModelContext();
+  const enabled = hasAgentControls(isHomeAcp, backend.kind === "local");
+  const { data: profiles } = useAgentProfiles({ enabled });
+  const launch =
+    enabled && profiles
+      ? resolveAcpLaunchProfile(profiles, backend.id, orgId)
+      : null;
+  const stored = useHomeAgentOptionsStore();
+  const values =
+    stored.launchKey === launch?.launchKey ? stored.values : NO_VALUES;
+  const preview = useAcpSessionPreview(launch, launchContext, values);
+
+  const lastAnswered = React.useRef<{
+    launchKey: string;
+    preview: AcpSessionPreview;
+  } | null>(null);
+  if (launch && preview.data && !preview.isPlaceholderData) {
+    lastAnswered.current = {
+      launchKey: launch.launchKey,
+      preview: preview.data,
+    };
+  }
+  const answered =
+    launch && lastAnswered.current?.launchKey === launch.launchKey
+      ? lastAnswered.current.preview
+      : null;
+
+  const refusal =
+    launch &&
+    preview.isError &&
+    isSdkHttpStatusError(preview.error, AGENT_REFUSAL_STATUS)
+      ? getApiErrorMessage(preview.error, preview.error.message)
+      : null;
+  const lastRefusal = React.useRef<{
+    launchKey: string;
+    sentence: string;
+  } | null>(null);
+  if (launch && refusal !== null) {
+    lastRefusal.current = { launchKey: launch.launchKey, sentence: refusal };
+  }
+
+  // Withdraw a refused pick.
+  const launchKey = launch?.launchKey;
+  const answeredValues = answered?.values ?? NO_VALUES;
+  const { setValues } = stored;
+  React.useEffect(() => {
+    if (launchKey && refusal !== null) setValues(launchKey, answeredValues);
+  }, [launchKey, refusal, answeredValues, setValues]);
+
+  if (!launch) return enabled ? LOADING_AGENT_CONTROLS : NO_AGENT_CONTROLS;
+  const shown = preview.isError && refusal === null ? null : answered;
+  const options = shown ? pickerOptions(shown.controls) : [];
+  return {
+    commands: shown?.controls.available_commands ?? [],
+    options,
+    pendingValues: preview.isFetching
+      ? changedValues(values, options)
+      : NO_VALUES,
+    rejection:
+      shown && lastRefusal.current?.launchKey === launch.launchKey
+        ? lastRefusal.current.sentence
+        : null,
+    isLoading: preview.isLoading,
+    setOption: (configId, value) => {
+      lastRefusal.current = null;
+      stored.setValue(launch.launchKey, configId, value);
+    },
+    startValues: shown ? acceptedValues(shown) : NO_VALUES,
   };
 }
